@@ -1,0 +1,32 @@
+{
+  "server_url": {
+    "description": "俄罗斯轮盘游戏后端服务地址（本地模式默认 http://127.0.0.1:8787，中央服务器模式默认 http://127.0.0.1:8080）",
+    "type": "string",
+    "default": "http://127.0.0.1:8787"
+  },
+  "mcp_endpoint": {
+    "description": "MCP Tool JSON-RPC 调用端点路径",
+    "type": "string",
+    "default": "/api/mcp/call"
+  },
+  "default_bots": {
+    "description": "创建对局时默认加入的 Bot 数量（1-7）",
+    "type": "int",
+    "default": 3
+  },
+  "admin_only": {
+    "description": "是否仅允许群管理员或 Bot 管理员创建与解散房间",
+    "type": "bool",
+    "default": false
+  },
+  "show_visual_board": {
+    "description": "是否在战况中打印 ASCII/Emoji 字符战术棋盘",
+    "type": "bool",
+    "default": true
+  },
+  "max_event_records": {
+    "description": "战报中最多附带展示的最新戏剧性事件流水条数",
+    "type": "int",
+    "default": 5
+  }
+}
