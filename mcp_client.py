@@ -60,6 +60,7 @@ class RussianRouletteMcpClient:
         """
         endpoint = self.get_full_url()
         payload = {
+            "tool": tool_name,
             "name": tool_name,
             "arguments": arguments,
         }
@@ -116,27 +117,47 @@ class RussianRouletteMcpClient:
 
             body = await asyncio.to_thread(_sync_request)
 
-        # Handle MCP CallToolResult structure
-        is_error = body.get("is_error", False)
-        contents = body.get("content", [])
-        raw_text = ""
-        for c in contents:
-            if c.get("type") == "text":
-                raw_text += c.get("text", "")
+        # Handle direct JSON response (from roulette-backend McpDispatcher)
+        if isinstance(body, list):
+            return body
 
-        parsed_data = {}
-        if raw_text:
-            try:
-                parsed_data = json.loads(raw_text)
-            except json.JSONDecodeError:
-                parsed_data = {"raw_text": raw_text}
+        if isinstance(body, dict):
+            # Handle standard MCP CallToolResult with "content"
+            if "content" in body:
+                is_error = body.get("is_error", False)
+                contents = body.get("content", [])
+                raw_text = ""
+                for c in contents:
+                    if isinstance(c, dict) and c.get("type") == "text":
+                        raw_text += c.get("text", "")
 
-        if is_error:
-            code = parsed_data.get("code", "MCP_TOOL_ERROR")
-            message = parsed_data.get("message", raw_text or "未知错误")
-            raise McpError(code=code, message=message, raw_response=parsed_data)
+                parsed_data = {}
+                if raw_text:
+                    try:
+                        parsed_data = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        parsed_data = {"raw_text": raw_text}
 
-        return parsed_data
+                if is_error:
+                    code = parsed_data.get("code", "MCP_TOOL_ERROR")
+                    message = parsed_data.get("message", raw_text or "未知错误")
+                    raise McpError(code=code, message=message, raw_response=parsed_data)
+
+                return parsed_data
+
+            if "error" in body:
+                err = body["error"]
+                if isinstance(err, dict):
+                    raise McpError(
+                        code=str(err.get("code", "MCP_ERROR")),
+                        message=err.get("message", str(err)),
+                        raw_response=body,
+                    )
+                raise McpError(code="MCP_ERROR", message=str(err), raw_response=body)
+
+            return body
+
+        return body
 
     # --- High-level Referee operations ---
 
