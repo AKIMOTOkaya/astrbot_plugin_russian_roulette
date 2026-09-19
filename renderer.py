@@ -458,13 +458,37 @@ def render_board_block(
     return "\n".join(lines)
 
 
+def is_game_running(game: Optional[Dict[str, Any]]) -> bool:
+    """Checks if game status represents active running state."""
+    if not game:
+        return False
+    status = game.get("status")
+    if status == "running":
+        return True
+    if isinstance(status, dict) and status.get("state") == "running":
+        return True
+    return False
+
+
+def is_game_finished(game: Optional[Dict[str, Any]]) -> bool:
+    """Checks if game status represents a finished terminal state."""
+    if not game:
+        return False
+    status = game.get("status")
+    if status == "finished":
+        return True
+    if isinstance(status, dict) and status.get("state") == "finished":
+        return True
+    return False
+
+
 def render_turn_callout(
     room_view: Dict[str, Any],
     player_qq_map: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Renders the dedicated turn callout for the acting player."""
     game = room_view.get("game")
-    if not game or game.get("status") != "running":
+    if not game or not is_game_running(game):
         return None
 
     current_pid = game.get("current_player_id")
@@ -546,9 +570,8 @@ def render_game_view(
         return "\n".join(lines)
 
     board_text = render_board_block(room_view, show_visual_board=show_visual_board, max_events=max_events)
-    status = game.get("status", "running")
 
-    if status == "finished":
+    if is_game_finished(game):
         winner = "无人幸存 (平局)"
         for p in game.get("players", []):
             if p.get("status") == "alive":

@@ -391,6 +391,18 @@ class TestCompressionHelpers(unittest.TestCase):
         self.assertIn("P3·Bot 3🤖💚(3,3)", roster)
         self.assertIn("2/3", roster)
 
+    def test_game_status_predicates(self):
+        from renderer import is_game_finished, is_game_running
+        self.assertTrue(is_game_running({"status": "running"}))
+        self.assertTrue(is_game_running({"status": {"state": "running"}}))
+        self.assertFalse(is_game_running({"status": {"state": "finished", "winner_id": 1}}))
+        self.assertFalse(is_game_running(None))
+
+        self.assertTrue(is_game_finished({"status": "finished"}))
+        self.assertTrue(is_game_finished({"status": {"state": "finished", "winner_id": 1}}))
+        self.assertFalse(is_game_finished({"status": {"state": "running"}}))
+        self.assertFalse(is_game_finished(None))
+
 
 if __name__ == "__main__":
     unittest.main()

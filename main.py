@@ -79,6 +79,8 @@ try:
         compress_action_desc,
         extract_high_priority_notifications,
         format_compact_record,
+        is_game_finished,
+        is_game_running,
         render_board_block,
         render_compact_roster,
         render_game_view,
@@ -93,6 +95,8 @@ except ImportError:
         compress_action_desc,
         extract_high_priority_notifications,
         format_compact_record,
+        is_game_finished,
+        is_game_running,
         render_board_block,
         render_compact_roster,
         render_game_view,
@@ -210,7 +214,7 @@ class RussianRoulettePlugin(Star):
         blocks.append(board_msg)
 
         # 4. Turn callout for next acting player (only if match is still running)
-        if game and game.get("status") == "running":
+        if game and is_game_running(game):
             callout_msg = self._render_callout_result(event, room_view)
             if callout_msg:
                 blocks.append(callout_msg)
