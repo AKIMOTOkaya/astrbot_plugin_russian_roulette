@@ -24,7 +24,7 @@ from main import DIRECTION_MAP, AstrMessageEvent, RussianRoulettePlugin
 class TestRussianRouletteRenderer(unittest.TestCase):
     def test_help_rendering(self):
         text = render_help()
-        self.assertIn("俄罗斯轮盘赌", text)
+        self.assertIn("俄罗斯轮盘", text)
         self.assertIn("/rr 开火", text)
         self.assertIn("/rr 移动", text)
 
@@ -146,7 +146,7 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         event = AstrMessageEvent(sender_id="user_123")
         results = [res async for res in plugin.handle_rr(event, "帮助")]
         self.assertEqual(len(results), 1)
-        self.assertIn("俄罗斯轮盘赌", results[0])
+        self.assertIn("俄罗斯轮盘", results[0])
 
     async def test_dispatch_unknown_command(self):
         plugin = RussianRoulettePlugin(None, {})

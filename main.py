@@ -192,7 +192,7 @@ class RussianRoulettePlugin(Star):
         try:
             rooms = await self.client.list_rooms()
             return (
-                f"✅ 轮盘赌后端连接正常！\n"
+                f"✅ 轮盘后端连接正常！\n"
                 f"• 服务地址: {self.client.server_url}\n"
                 f"• MCP端点: {self.client.mcp_endpoint}\n"
                 f"• 当前活跃房间: {len(rooms)} 间"
@@ -212,7 +212,7 @@ class RussianRoulettePlugin(Star):
     async def _handle_create_room(self, event: AstrMessageEvent, args: List[str]) -> str:
         # Syntax: /rr 创建 [名称/房间号] [bot数]
         default_bots = int(self.config.get("default_bots", 3))
-        room_name = f"QQ群轮盘局_{event.get_sender_name()}"
+        room_name = f"QQ群轮盘_{event.get_sender_name()}"
         initial_bots = default_bots
 
         if len(args) >= 1:
