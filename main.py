@@ -182,7 +182,7 @@ class RussianRoulettePlugin(Star):
             elif cmd in ("start", "开始", "开局"):
                 yield event.plain_result(await self._handle_start_room(event, args))
 
-            elif cmd in ("view", "战况", "状态", "info", "看"):
+            elif cmd in ("view", "战况", "对局", "info", "看"):
                 yield event.plain_result(await self._handle_view_room(event, args))
 
             elif cmd in ("shoot", "开火", "开枪", "射击", "fire"):
