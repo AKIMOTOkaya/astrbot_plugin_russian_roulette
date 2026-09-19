@@ -143,15 +143,15 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
 
     async def test_dispatch_help(self):
         plugin = RussianRoulettePlugin(None, {})
-        event = AstrMessageEvent(sender_id="user_123")
-        results = [res async for res in plugin.handle_rr(event, "帮助")]
+        event = AstrMessageEvent(sender_id="user_123", message_str="/rr 帮助")
+        results = [res async for res in plugin.handle_rr(event)]
         self.assertEqual(len(results), 1)
         self.assertIn("俄罗斯轮盘", results[0])
 
     async def test_dispatch_unknown_command(self):
         plugin = RussianRoulettePlugin(None, {})
-        event = AstrMessageEvent(sender_id="user_123")
-        results = [res async for res in plugin.handle_rr(event, "foobar")]
+        event = AstrMessageEvent(sender_id="user_123", message_str="/rr foobar")
+        results = [res async for res in plugin.handle_rr(event)]
         self.assertEqual(len(results), 1)
         self.assertIn("未知轮盘指令", results[0])
 
@@ -160,11 +160,11 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         # 1. Mock create_room
         mock_call.return_value = {"id": "TEST1", "name": "测试房", "phase": "waiting"}
         plugin = RussianRoulettePlugin(None, {"server_url": "http://127.0.0.1:8787"})
-        event = AstrMessageEvent(sender_id="user_host")
+        event = AstrMessageEvent(sender_id="user_host", message_str="/rr 创建 2")
         event.unified_msg_origin = "group_999"
 
-        # /rr 创建
-        results = [res async for res in plugin.handle_rr(event, "创建", "2")]
+        # /rr 创建 2
+        results = [res async for res in plugin.handle_rr(event)]
         self.assertIn("成功创建轮盘对局房间 [TEST1]", results[0])
         self.assertEqual(plugin._session_rooms["group_999"], "TEST1")
 
@@ -190,7 +190,8 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
             },
         ]
 
-        results = [res async for res in plugin.handle_rr(event, "开始")]
+        event.message_str = "/rr 开始"
+        results = [res async for res in plugin.handle_rr(event)]
         self.assertIn("俄罗斯轮盘装填完毕", results[0])
         self.assertIn("Host", results[0])
 

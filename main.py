@@ -39,6 +39,9 @@ except ImportError:
         def get_sender_name(self) -> str:
             return f"User_{self.sender_id}"
 
+        def get_message_str(self) -> str:
+            return self.message_str
+
         def plain_result(self, text: str) -> str:
             return text
 
@@ -114,22 +117,50 @@ class RussianRoulettePlugin(Star):
 
     def _set_active_room(self, event: AstrMessageEvent, room_id: str) -> None:
         session_id = getattr(event, "unified_msg_origin", "default")
-        self._session_rooms[session_id] = room_id.upper()
+        self._session_rooms[session_id] = room_id
 
     @filter.command("rr")
-    async def handle_rr(self, event: AstrMessageEvent, sub_cmd: str = "帮助", *args):
+    async def handle_rr(self, event: AstrMessageEvent):
         """
         主指令入口：/rr [子指令] [参数]
         """
-        async for res in self._dispatch_command(event, sub_cmd, list(args)):
+        raw = ""
+        if hasattr(event, "get_message_str"):
+            try:
+                raw = event.get_message_str()
+            except Exception:
+                pass
+        if not raw and hasattr(event, "message_str"):
+            raw = event.message_str
+
+        parts = raw.strip().split()
+        if parts and parts[0].lstrip("/").lower() in ("rr", "轮盘"):
+            parts = parts[1:]
+        sub_cmd = parts[0] if parts else "帮助"
+        args = parts[1:] if len(parts) > 1 else []
+        async for res in self._dispatch_command(event, sub_cmd, args):
             yield res
 
     @filter.command("轮盘")
-    async def handle_roulette(self, event: AstrMessageEvent, sub_cmd: str = "帮助", *args):
+    async def handle_roulette(self, event: AstrMessageEvent):
         """
         中文别名入口：/轮盘 [子指令] [参数]
         """
-        async for res in self._dispatch_command(event, sub_cmd, list(args)):
+        raw = ""
+        if hasattr(event, "get_message_str"):
+            try:
+                raw = event.get_message_str()
+            except Exception:
+                pass
+        if not raw and hasattr(event, "message_str"):
+            raw = event.message_str
+
+        parts = raw.strip().split()
+        if parts and parts[0].lstrip("/").lower() in ("rr", "轮盘"):
+            parts = parts[1:]
+        sub_cmd = parts[0] if parts else "帮助"
+        args = parts[1:] if len(parts) > 1 else []
+        async for res in self._dispatch_command(event, sub_cmd, args):
             yield res
 
     async def _dispatch_command(self, event: AstrMessageEvent, sub_cmd: str, args: List[str]):
