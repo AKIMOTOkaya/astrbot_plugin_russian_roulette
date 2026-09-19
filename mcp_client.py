@@ -5,22 +5,12 @@ Communicates with the Russian Roulette backend server via MCP JSON-RPC protocol.
 
 from __future__ import annotations
 
-import asyncio
 import json
-import logging
-import urllib.error
-import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
 
-try:
-    import aiohttp
-    HAS_AIOHTTP = True
-except ImportError:
-    aiohttp = None  # type: ignore
-    HAS_AIOHTTP = False
-
-logger = logging.getLogger("astrbot.plugin.russian_roulette")
+import aiohttp
+from astrbot.api import logger
 
 
 class McpError(Exception):
@@ -65,57 +55,31 @@ class RussianRouletteMcpClient:
             "arguments": arguments,
         }
 
-        if HAS_AIOHTTP and aiohttp is not None:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        endpoint,
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                        timeout=aiohttp.ClientTimeout(total=10.0),
-                    ) as response:
-                        if response.status != 200:
-                            text = await response.text()
-                            raise McpError(
-                                code="HTTP_ERROR",
-                                message=f"HTTP {response.status}: {text}",
-                            )
-
-                        body = await response.json()
-            except aiohttp.ClientConnectorError as e:
-                raise McpError(
-                    code="CONNECTION_ERROR",
-                    message=f"无法连接到轮盘服务 ({self.server_url})，请检查后端是否已启动: {e}",
-                ) from e
-            except Exception as e:
-                if isinstance(e, McpError):
-                    raise
-                raise McpError(code="NETWORK_ERROR", message=f"请求失败: {e}") from e
-        else:
-            def _sync_request():
-                req = urllib.request.Request(
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
                     endpoint,
-                    data=json.dumps(payload).encode("utf-8"),
+                    json=payload,
                     headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=10.0) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-                except urllib.error.HTTPError as e:
-                    text = e.read().decode("utf-8", errors="replace")
-                    raise McpError(code="HTTP_ERROR", message=f"HTTP {e.code}: {text}")
-                except urllib.error.URLError as e:
-                    raise McpError(
-                        code="CONNECTION_ERROR",
-                        message=f"无法连接到轮盘服务 ({self.server_url})，请检查后端是否已启动: {e}",
-                    )
-                except Exception as e:
-                    if isinstance(e, McpError):
-                        raise
-                    raise McpError(code="NETWORK_ERROR", message=f"请求失败: {e}")
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                ) as response:
+                    if response.status != 200:
+                        text = await response.text()
+                        raise McpError(
+                            code="HTTP_ERROR",
+                            message=f"HTTP {response.status}: {text}",
+                        )
 
-            body = await asyncio.to_thread(_sync_request)
+                    body = await response.json()
+        except aiohttp.ClientConnectorError as e:
+            raise McpError(
+                code="CONNECTION_ERROR",
+                message=f"无法连接到轮盘服务 ({self.server_url})，请检查后端是否已启动: {e}",
+            ) from e
+        except McpError:
+            raise
+        except Exception as e:
+            raise McpError(code="NETWORK_ERROR", message=f"请求失败: {e}") from e
 
         # Handle direct JSON response (from roulette-backend McpDispatcher)
         if isinstance(body, list):

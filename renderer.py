@@ -5,6 +5,7 @@ Formats game views, ASCII tactical boards, player statuses, and drama events int
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -188,7 +189,6 @@ def render_rooms_summary(rooms: List[Dict[str, Any]], filter_phase: Optional[str
 
 def compress_action_desc(desc: str) -> str:
     """Translates and compresses raw step action descriptions into concise emoji tags."""
-    import re
     # Match Bot actions: Bot PlayerId(1) 执行了 Move { direction: Up }
     m = re.search(r"Bot PlayerId\((\w+)\) 执行了 Move \{ direction: (\w+) \}", desc)
     if m:
@@ -530,7 +530,6 @@ def render_turn_callout(
         if player_qq_map and str(current_pid) in player_qq_map:
             qq = player_qq_map[str(current_pid)]
         elif acting_member:
-            import re
             m = re.search(r"\d{5,12}", acting_member.get("name", ""))
             if m:
                 qq = m.group(0)

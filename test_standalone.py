@@ -4,21 +4,138 @@ Can be executed directly with `python3 test_standalone.py`.
 """
 
 import asyncio
+from pathlib import Path
+import sys
+import types
 import unittest
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, patch
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from mcp_client import McpError, RussianRouletteMcpClient
-from renderer import (
+# --- Register mock aiohttp if not installed ---
+if "aiohttp" not in sys.modules:
+    mock_aiohttp = types.ModuleType("aiohttp")
+    mock_aiohttp.ClientSession = MagicMock()
+    mock_aiohttp.ClientTimeout = MagicMock()
+    mock_aiohttp.ClientConnectorError = Exception
+    sys.modules["aiohttp"] = mock_aiohttp
+
+# --- Register mock astrbot module hierarchy if not installed ---
+if "astrbot" not in sys.modules:
+    mock_astrbot = types.ModuleType("astrbot")
+    sys.modules["astrbot"] = mock_astrbot
+
+    mock_api = types.ModuleType("astrbot.api")
+
+    class MockLogger:
+        def info(self, msg, *args, **kwargs): pass
+        def warning(self, msg, *args, **kwargs): pass
+        def error(self, msg, *args, **kwargs): pass
+        def exception(self, msg, *args, **kwargs): pass
+        def debug(self, msg, *args, **kwargs): pass
+
+    mock_logger = MockLogger()
+    mock_api.logger = mock_logger
+    mock_api.AstrBotConfig = dict
+    sys.modules["astrbot.api"] = mock_api
+    mock_astrbot.api = mock_api
+
+    mock_event = types.ModuleType("astrbot.api.event")
+
+    class AstrMessageEvent:
+        def __init__(self, sender_id: str = "mock_user", message_str: str = ""):
+            self.sender_id = sender_id
+            self.message_str = message_str
+            self.unified_msg_origin = "mock_session"
+
+        def get_sender_id(self) -> str:
+            return self.sender_id
+
+        def get_sender_name(self) -> str:
+            return f"User_{self.sender_id}"
+
+        def get_message_str(self) -> str:
+            return self.message_str
+
+        def plain_result(self, text: str) -> str:
+            return text
+
+        def chain_result(self, chain: List[Any]) -> str:
+            parts = []
+            for c in chain:
+                if hasattr(c, "text"):
+                    parts.append(getattr(c, "text"))
+                elif hasattr(c, "qq"):
+                    parts.append(f"@{getattr(c, 'qq')}")
+                else:
+                    parts.append(str(c))
+            return "".join(parts)
+
+    class MockFilter:
+        @staticmethod
+        def command(cmd_name: str):
+            def decorator(func):
+                return func
+            return decorator
+
+    mock_event.AstrMessageEvent = AstrMessageEvent
+    mock_event.filter = MockFilter
+    sys.modules["astrbot.api.event"] = mock_event
+    mock_api.event = mock_event
+
+    mock_mc = types.ModuleType("astrbot.api.message_components")
+
+    class At:
+        def __init__(self, qq: Any = None):
+            self.qq = qq
+
+    class Plain:
+        def __init__(self, text: str = ""):
+            self.text = text
+
+    mock_mc.At = At
+    mock_mc.Plain = Plain
+    sys.modules["astrbot.api.message_components"] = mock_mc
+    mock_api.message_components = mock_mc
+
+    mock_star = types.ModuleType("astrbot.api.star")
+
+    class Star:
+        def __init__(self, context: Any):
+            self.context = context
+
+    class Context:
+        pass
+
+    mock_star.Star = Star
+    mock_star.Context = Context
+    sys.modules["astrbot.api.star"] = mock_star
+    mock_api.star = mock_star
+else:
+    from astrbot.api.event import AstrMessageEvent
+
+# Ensure clients directory is in sys.path so astrbot_plugin_russian_roulette is recognized as a package
+_pkg_root = Path(__file__).resolve().parent.parent
+if str(_pkg_root) not in sys.path:
+    sys.path.insert(0, str(_pkg_root))
+
+from astrbot_plugin_russian_roulette.mcp_client import McpError, RussianRouletteMcpClient
+from astrbot_plugin_russian_roulette.renderer import (
+    compress_action_desc,
+    format_compact_record,
     format_elimination_cause,
     format_weather,
+    is_game_finished,
+    is_game_running,
     render_board,
+    render_board_block,
+    render_compact_roster,
     render_game_view,
     render_help,
     render_rooms_summary,
     render_step_result,
+    render_turn_callout,
 )
-from main import DIRECTION_MAP, AstrMessageEvent, RussianRoulettePlugin
+from astrbot_plugin_russian_roulette.main import DIRECTION_MAP, RussianRoulettePlugin
 
 
 class TestRussianRouletteRenderer(unittest.TestCase):
@@ -372,14 +489,12 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
 
 class TestCompressionHelpers(unittest.TestCase):
     def test_compress_action_desc(self):
-        from renderer import compress_action_desc
         self.assertEqual(compress_action_desc("Bot PlayerId(1) 执行了 Move { direction: Up }"), "P1🤖 🚶↑")
         self.assertEqual(compress_action_desc("Bot PlayerId(2) 执行了 Shoot { direction: Right }"), "P2🤖 🔫→")
         self.assertEqual(compress_action_desc("Bot PlayerId(3) 执行了 Wait"), "P3🤖 ⏳跳过")
         self.assertEqual(compress_action_desc("Player 1 执行了 Move { direction: Down }"), "P1👤 🚶↓")
 
     def test_compact_roster(self):
-        from renderer import render_compact_roster
         players = [
             {"id": 1, "name": "秋元萱", "kind": "human", "status": "alive", "position": {"x": 0, "y": 1}, "has_shield": True},
             {"id": 2, "name": "Bot 2", "kind": "bot", "status": "eliminated"},
@@ -392,7 +507,6 @@ class TestCompressionHelpers(unittest.TestCase):
         self.assertIn("2/3", roster)
 
     def test_game_status_predicates(self):
-        from renderer import is_game_finished, is_game_running
         self.assertTrue(is_game_running({"status": "running"}))
         self.assertTrue(is_game_running({"status": {"state": "running"}}))
         self.assertFalse(is_game_running({"status": {"state": "finished", "winner_id": 1}}))

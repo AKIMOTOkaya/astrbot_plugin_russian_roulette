@@ -5,106 +5,29 @@ Interacts with the authoritative Russian Roulette backend via MCP.
 
 from __future__ import annotations
 
-import logging
+import re
 from typing import Any, Dict, List, Optional
 
-try:
-    from astrbot.api import AstrBotConfig, logger
-    from astrbot.api.event import AstrMessageEvent, filter
-    from astrbot.api.message_components import At, Plain
-    from astrbot.api.star import Context, Star
-except ImportError:
-    # Standalone mock fallback for local unit testing outside AstrBot environment
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("astrbot.plugin.russian_roulette")
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import At, Plain
+from astrbot.api.star import Context, Star
 
-    class Star:  # type: ignore
-        def __init__(self, context: Any):
-            self.context = context
-
-    class Context:  # type: ignore
-        pass
-
-    class AstrBotConfig(dict):  # type: ignore
-        pass
-
-    class At:  # type: ignore
-        def __init__(self, qq: Any = None):
-            self.qq = qq
-
-    class Plain:  # type: ignore
-        def __init__(self, text: str = ""):
-            self.text = text
-
-    class AstrMessageEvent:  # type: ignore
-        def __init__(self, sender_id: str = "mock_user", message_str: str = ""):
-            self.sender_id = sender_id
-            self.message_str = message_str
-            self.unified_msg_origin = "mock_session"
-
-        def get_sender_id(self) -> str:
-            return self.sender_id
-
-        def get_sender_name(self) -> str:
-            return f"User_{self.sender_id}"
-
-        def get_message_str(self) -> str:
-            return self.message_str
-
-        def plain_result(self, text: str) -> str:
-            return text
-
-        def chain_result(self, chain: List[Any]) -> str:
-            parts = []
-            for c in chain:
-                if hasattr(c, "text"):
-                    parts.append(getattr(c, "text"))
-                elif hasattr(c, "qq"):
-                    parts.append(f"@{getattr(c, 'qq')}")
-                else:
-                    parts.append(str(c))
-            return "".join(parts)
-
-    class filter:  # type: ignore
-        @staticmethod
-        def command(cmd_name: str):
-            def decorator(func):
-                return func
-            return decorator
-
-
-try:
-    from .mcp_client import McpError, RussianRouletteMcpClient
-    from .renderer import (
-        compress_action_desc,
-        extract_high_priority_notifications,
-        format_compact_record,
-        is_game_finished,
-        is_game_running,
-        render_board_block,
-        render_compact_roster,
-        render_game_view,
-        render_help,
-        render_rooms_summary,
-        render_step_result,
-        render_turn_callout,
-    )
-except ImportError:
-    from mcp_client import McpError, RussianRouletteMcpClient
-    from renderer import (
-        compress_action_desc,
-        extract_high_priority_notifications,
-        format_compact_record,
-        is_game_finished,
-        is_game_running,
-        render_board_block,
-        render_compact_roster,
-        render_game_view,
-        render_help,
-        render_rooms_summary,
-        render_step_result,
-        render_turn_callout,
-    )
+from .mcp_client import McpError, RussianRouletteMcpClient
+from .renderer import (
+    compress_action_desc,
+    extract_high_priority_notifications,
+    format_compact_record,
+    is_game_finished,
+    is_game_running,
+    render_board_block,
+    render_compact_roster,
+    render_game_view,
+    render_help,
+    render_rooms_summary,
+    render_step_result,
+    render_turn_callout,
+)
 
 DIRECTION_MAP = {
     # Up
@@ -145,7 +68,6 @@ class RussianRoulettePlugin(Star):
             self._player_qq_map[event.get_sender_name()] = sid
 
         if room_view:
-            import re
             for m in room_view.get("members", []):
                 pid = m.get("player_id")
                 if pid is not None and m.get("kind") == "human":
@@ -233,47 +155,34 @@ class RussianRoulettePlugin(Star):
         session_id = getattr(event, "unified_msg_origin", "default")
         self._session_rooms[session_id] = room_id
 
-    @filter.command("rr")
-    async def handle_rr(self, event: AstrMessageEvent):
-        """
-        主指令入口：/rr [子指令] [参数]
-        """
+    def _extract_command_parts(self, event: AstrMessageEvent) -> tuple[str, List[str]]:
         raw = ""
         if hasattr(event, "get_message_str"):
             try:
                 raw = event.get_message_str()
-            except Exception:
-                pass
+            except (AttributeError, TypeError) as e:
+                logger.debug(f"Could not read message string via get_message_str: {e}")
         if not raw and hasattr(event, "message_str"):
-            raw = event.message_str
+            raw = str(getattr(event, "message_str", ""))
 
         parts = raw.strip().split()
         if parts and parts[0].lstrip("/").lower() in ("rr", "轮盘"):
             parts = parts[1:]
         sub_cmd = parts[0] if parts else "帮助"
         args = parts[1:] if len(parts) > 1 else []
+        return sub_cmd, args
+
+    @filter.command("rr")
+    async def handle_rr(self, event: AstrMessageEvent):
+        """主指令入口：/rr [子指令] [参数]"""
+        sub_cmd, args = self._extract_command_parts(event)
         async for res in self._dispatch_command(event, sub_cmd, args):
             yield res
 
     @filter.command("轮盘")
     async def handle_roulette(self, event: AstrMessageEvent):
-        """
-        中文别名入口：/轮盘 [子指令] [参数]
-        """
-        raw = ""
-        if hasattr(event, "get_message_str"):
-            try:
-                raw = event.get_message_str()
-            except Exception:
-                pass
-        if not raw and hasattr(event, "message_str"):
-            raw = event.message_str
-
-        parts = raw.strip().split()
-        if parts and parts[0].lstrip("/").lower() in ("rr", "轮盘"):
-            parts = parts[1:]
-        sub_cmd = parts[0] if parts else "帮助"
-        args = parts[1:] if len(parts) > 1 else []
+        """中文别名入口：/轮盘 [子指令] [参数]"""
+        sub_cmd, args = self._extract_command_parts(event)
         async for res in self._dispatch_command(event, sub_cmd, args):
             yield res
 
@@ -350,11 +259,6 @@ class RussianRoulettePlugin(Star):
             elif res:
                 yield _yield_result(res)
 
-        except McpError as e:
-            yield event.plain_result(f"❌ 轮盘游戏错误 [{e.code}]: {e.message}")
-        except Exception as e:
-            logger.exception("Unexpected error in RussianRoulettePlugin")
-            yield event.plain_result(f"⚠️ 执行异常: {e}")
         except McpError as e:
             yield event.plain_result(f"❌ 轮盘游戏错误 [{e.code}]: {e.message}")
         except Exception as e:
@@ -720,8 +624,8 @@ class RussianRoulettePlugin(Star):
                         view = await self.client.inspect_room(room_id)
                         if view.get("phase") in ("playing", "in_game"):
                             return await self._handle_step(event, [])
-                    except Exception:
-                        pass
+                    except McpError as e:
+                        logger.debug(f"Room inspection fallback failed: {e}")
                 return "⚠️ 请指定 bot 操作，例如：`/rr bot 加`、`/rr bot 减` 或 `/rr bot 4`"
 
             first = args[0].lower().strip()
@@ -828,7 +732,8 @@ class RussianRoulettePlugin(Star):
                 f"  - 🌊 水洼：涉水移动延迟，连续两回合在水中将溺水淘汰。\n"
                 f"  - 📦 木箱：掩体，承受撞击或射击后可能损毁。"
             )
-        except Exception:
+        except McpError as e:
+            logger.warning(f"Could not query remote rules, falling back to static summary: {e}")
             return (
                 "📖 【俄罗斯轮盘规则简述】\n"
                 "• 玩家在地图上轮流行动（移动或开火）；\n"
