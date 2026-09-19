@@ -92,8 +92,32 @@ if "astrbot" not in sys.modules:
         def __init__(self, text: str = ""):
             self.text = text
 
+    class Image:
+        def __init__(self, *args, **kwargs):
+            self.base64 = None
+            self.path = None
+
+        def __str__(self):
+            return f"<Image base64={self.base64} path={self.path}>"
+
+        def __repr__(self):
+            return self.__str__()
+
+        @classmethod
+        def fromBase64(cls, base64_str: str):
+            instance = cls()
+            instance.base64 = base64_str
+            return instance
+
+        @classmethod
+        def fromFileSystem(cls, path: str):
+            instance = cls()
+            instance.path = path
+            return instance
+
     mock_mc.At = At
     mock_mc.Plain = Plain
+    mock_mc.Image = Image
     sys.modules["astrbot.api.message_components"] = mock_mc
     mock_api.message_components = mock_mc
 
@@ -377,7 +401,7 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         results = [res async for res in plugin.handle_rr(event)]
         self.assertIn("裁判裁定", results[0])
         # Verify force_command was called with direction "up"
-        mock_call.assert_called_with(
+        mock_call.assert_any_call(
             "referee_force_command",
             {
                 "room_id": "ROOM9",
@@ -485,6 +509,60 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("P2🤖 🔫→" in r for r in results))
         self.assertTrue(any("战术地图" in r for r in results))
         self.assertTrue(any("轮到你行动了" in r and ("秋元萱" in r or "2393120566" in r) for r in results))
+
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_image_rendering_success_and_fallback(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {"render_image": True, "show_visual_board_with_image": False})
+        event = AstrMessageEvent(sender_id="2393120566", message_str="/rr 战况")
+        event.unified_msg_origin = "grp_test"
+        plugin._session_rooms["grp_test"] = "IMG01"
+
+        room_data = {
+            "id": "IMG01",
+            "name": "战术图像测试",
+            "phase": "in_game",
+            "game": {
+                "revision": 1,
+                "round": 1,
+                "status": "running",
+                "weather": "clear",
+                "alive_player_count": 2,
+                "current_player_id": 1,
+                "players": [
+                    {"id": 1, "name": "Host", "kind": "human", "status": "alive", "position": {"x": 0, "y": 0}},
+                    {"id": 2, "name": "Bot1", "kind": "bot", "status": "alive", "position": {"x": 1, "y": 1}},
+                ],
+                "map_size": 2,
+                "cells": [
+                    {"position": {"x": 0, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 0, "y": 1}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 1}, "terrain": "plain"},
+                ],
+                "records": [],
+            },
+        }
+
+        # Case 1: Image renders successfully -> blocks contain image, no redundant text board
+        mock_call.side_effect = [
+            room_data,                                                   # inspect_room
+            {"base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}, # render_room_image
+        ]
+        results = [res async for res in plugin.handle_rr(event)]
+        # Check that Image component exists
+        self.assertTrue(any(hasattr(r, "base64") or "iVBORw0" in str(r) for r in results))
+        # Text board should NOT be present when show_visual_board_with_image=False
+        self.assertFalse(any("战术地图" in str(r) for r in results))
+
+        # Case 2: Image rendering fails -> fallback to text board
+        mock_call.side_effect = [
+            room_data,                     # inspect_room
+            Exception("Simulated MCP Error"), # render_room_image fails
+        ]
+        results = [res async for res in plugin.handle_rr(event)]
+        # Fallback text board should now be present!
+        self.assertTrue(any("战术地图" in str(r) for r in results))
+
 
 
 class TestCompressionHelpers(unittest.TestCase):

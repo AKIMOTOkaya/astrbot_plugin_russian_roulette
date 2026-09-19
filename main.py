@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import At, Plain
+from astrbot.api.message_components import At, Image, Plain
 from astrbot.api.star import Context, Star
 
 from .mcp_client import McpError, RussianRouletteMcpClient
@@ -98,7 +98,7 @@ class RussianRoulettePlugin(Star):
         else:
             return callout.get("text")
 
-    def _build_game_message_blocks(
+    async def _build_game_message_blocks(
         self,
         event: AstrMessageEvent,
         room_view: Dict[str, Any],
@@ -107,7 +107,7 @@ class RussianRoulettePlugin(Star):
         show_board: bool = True,
         max_events: int = 3,
     ) -> List[Any]:
-        """Separates match status into distinct, bite-sized messages."""
+        """Separates match status into distinct, bite-sized messages with graphical output."""
         self._track_player_qq(event, room_view)
         blocks: List[Any] = []
 
@@ -131,9 +131,34 @@ class RussianRoulettePlugin(Star):
         if step_summary:
             blocks.append(step_summary)
 
-        # 3. Compact board & tactical map
-        board_msg = render_board_block(room_view, show_visual_board=show_board, max_events=max_events)
-        blocks.append(board_msg)
+        # 3. Graphical image or compact board
+        render_img = bool(self.config.get("render_image", True))
+        view_mode = str(self.config.get("image_view_mode", "full"))
+        image_rendered = False
+
+        if render_img and room_view.get("id"):
+            room_id = room_view["id"]
+            try:
+                img_res = await self.client.render_room_image(
+                    room_id=room_id,
+                    format_str="png",
+                    view_mode=view_mode,
+                )
+                if isinstance(img_res, dict) and "base64" in img_res:
+                    b64_str = img_res["base64"]
+                    img_comp = Image.fromBase64(b64_str)
+                    if hasattr(event, "chain_result"):
+                        blocks.append(event.chain_result([img_comp]))
+                    else:
+                        blocks.append(img_comp)
+                    image_rendered = True
+            except Exception as e:
+                logger.warning(f"Failed to render tactical image for room {room_id}: {e}")
+
+        # Fallback or text board if image was not rendered or text board is explicitly enabled
+        if not image_rendered or self.config.get("show_visual_board_with_image", False):
+            board_msg = render_board_block(room_view, show_visual_board=show_board, max_events=max_events)
+            blocks.append(board_msg)
 
         # 4. Turn callout for next acting player (only if match is still running)
         if game and is_game_running(game):
@@ -403,7 +428,7 @@ class RussianRoulettePlugin(Star):
         seed_str = f" (固定随机种子: {seed})" if seed is not None else ""
         start_notif = f"🔫 俄罗斯轮盘装填完毕，保险拔除，对决正式开始！{seed_str}"
 
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             extra_notifications=[start_notif],
@@ -435,7 +460,7 @@ class RussianRoulettePlugin(Star):
         if phase == "waiting" or not room_view.get("game"):
             return render_game_view(room_view, player_qq_map=self._player_qq_map)
 
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             show_board=show_board,
@@ -467,7 +492,7 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             step_summary=summary,
@@ -500,7 +525,7 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             step_summary=summary,
@@ -519,7 +544,7 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             step_summary=summary,
@@ -538,7 +563,7 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             step_summary=summary,
@@ -567,7 +592,7 @@ class RussianRoulettePlugin(Star):
             summary = render_step_result(step_res)
             room_view = step_res.get("room") or await self.client.inspect_room(room_id)
             show_board = bool(self.config.get("show_visual_board", True))
-            return self._build_game_message_blocks(
+            return await self._build_game_message_blocks(
                 event,
                 room_view,
                 step_summary=summary,
@@ -594,7 +619,7 @@ class RussianRoulettePlugin(Star):
         header = f"🎯 【连续步进执行结果】(推进 {len([l for l in step_logs if l.startswith('•')])} 步)：\n" + "\n".join(step_logs)
         room_view = last_step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        return self._build_game_message_blocks(
+        return await self._build_game_message_blocks(
             event,
             room_view,
             step_summary=header,

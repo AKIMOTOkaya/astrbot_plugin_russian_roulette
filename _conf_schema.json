@@ -20,9 +20,24 @@
     "default": false
   },
   "show_visual_board": {
-    "description": "是否在战况中打印 ASCII/Emoji 字符战术棋盘",
+    "description": "是否在战况中打印 ASCII/Emoji 字符战术棋盘（仅在未启用图片或图片降级时生效）",
     "type": "bool",
     "default": true
+  },
+  "render_image": {
+    "description": "是否调用后端图像合成引擎渲染并在群聊中发送高清战术图像（PNG）",
+    "type": "bool",
+    "default": true
+  },
+  "image_view_mode": {
+    "description": "战术图像渲染视角模式（full 完整全景 / observer 观战者 / player 玩家迷雾视角）",
+    "type": "string",
+    "default": "full"
+  },
+  "show_visual_board_with_image": {
+    "description": "在战术图片成功渲染时，是否仍然同时输出文本字符棋盘（默认关闭以保持群消息清爽）",
+    "type": "bool",
+    "default": false
   },
   "max_event_records": {
     "description": "战报中最多附带展示的最新戏剧性事件流水条数",

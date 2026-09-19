@@ -3,6 +3,13 @@
 本项目遵循 [Semantic Versioning (语义化版本)](https://semver.org/lang/zh-CN/) 规范。
 注意：AstrBot 插件市场要求每次提交或重新审核发布时**必须递增版本号**，即使历史版本被驳回或撤回也不得复用。
 
+## [1.0.2] - 2026-09-20
+
+### 新增与优化 (Features & Improvements)
+- **接入规则矢量战术图形渲染引擎**：在 MCP 客户端中新增 `render_room_image` 端点调用，对战中自动调用后端 `referee_render_room_image` 工具生成高清战术 PNG 战况板，以图片消息直观呈现战场地形、弹孔、弹道与血条；
+- **智能双显与容错降级**：若图片渲染因网络或引擎原因异常，自动降级为字符棋盘；支持通过 `render_image` 与 `show_visual_board_with_image` 自定义配置是否发送图片或与文本棋盘混排；
+- **配置项扩展**：在 `_conf_schema.json` 中增加 `render_image`、`image_view_mode`、`show_visual_board_with_image` 配置项，支持全景模式、观战视角及玩家迷雾视角切换。
+
 ---
 
 ## [1.0.1] - 2026-09-19

@@ -304,6 +304,27 @@ class RussianRouletteMcpClient:
         """Queries game rules, weather, and terrain hardness mechanics."""
         return await self.call_tool("referee_query_rules", {})
 
+    async def render_room_image(
+        self,
+        room_id: str,
+        format_str: str = "png",
+        view_mode: str = "full",
+        cell_size: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Renders the current match tactical HUD card or dynamic standalone board into an image.
+        Returns a dict containing 'base64', 'format', 'size_bytes', and 'data_uri'.
+        """
+        room_id = room_id.upper().strip()
+        args: Dict[str, Any] = {
+            "room_id": room_id,
+            "format": format_str,
+            "view_mode": view_mode,
+        }
+        if cell_size is not None:
+            args["cell_size"] = cell_size
+        return await self.call_tool("referee_render_room_image", args)
+
     async def _ensure_revision(self, room_id: str) -> int:
         rev = self.get_cached_revision(room_id)
         if rev is None:
