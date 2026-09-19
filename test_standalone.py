@@ -289,6 +289,20 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已解除当前群聊与房间 [ROOM9] 的绑定记忆", results[0])
         self.assertNotIn("group_100", plugin._session_rooms)
 
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_list_rooms_filter(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
+        mock_call.return_value = [
+            {"id": "ROOM1", "name": "等待房", "phase": "waiting", "member_count": 2},
+            {"id": "ROOM2", "name": "激战房", "phase": "playing", "member_count": 4, "alive_player_count": 3},
+            {"id": "ROOM3", "name": "终局房", "phase": "finished", "member_count": 4, "alive_player_count": 1},
+        ]
+        event = AstrMessageEvent(sender_id="user1", message_str="/rr 房间 进行")
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("激战房", results[0])
+        self.assertNotIn("等待房", results[0])
+        self.assertIn("⚔️ 激战中", results[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -168,8 +168,17 @@ class RussianRouletteMcpClient:
             args["filter_phase"] = filter_phase
         result = await self.call_tool("referee_list_rooms", args)
         if isinstance(result, list):
-            return result
-        return result.get("rooms", [])
+            rooms = result
+        else:
+            rooms = result.get("rooms", [])
+
+        if filter_phase:
+            target = "playing" if filter_phase in ("playing", "in_game") else filter_phase
+            rooms = [
+                r for r in rooms
+                if r.get("phase") == target or (target == "playing" and r.get("phase") in ("playing", "in_game"))
+            ]
+        return rooms
 
     async def inspect_room(self, room_id: str) -> Dict[str, Any]:
         """Inspects omniscient room snapshot and syncs revision cache."""

@@ -153,6 +153,7 @@ def render_help(topic: Optional[str] = None) -> str:
 def render_rooms_summary(rooms: List[Dict[str, Any]], filter_phase: Optional[str] = None) -> str:
     filter_zh = {
         "waiting": "⏳ 等待中",
+        "playing": "⚔️ 激战中",
         "in_game": "⚔️ 激战中",
         "finished": "🏁 已终局",
     }.get(filter_phase or "", "")
@@ -164,6 +165,7 @@ def render_rooms_summary(rooms: List[Dict[str, Any]], filter_phase: Optional[str
     lines = [f"📋 【当前轮盘对局列表】{title_suffix}(共 {len(rooms)} 间)：", "──────────────────────"]
     phase_icons = {
         "waiting": "⏳ 等待中",
+        "playing": "⚔️ 激战中",
         "in_game": "⚔️ 激战中",
         "finished": "🏁 已终局",
         "dissolved": "🚫 已解散",

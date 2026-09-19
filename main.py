@@ -534,7 +534,7 @@ class RussianRoulettePlugin(Star):
                 if room_id:
                     try:
                         view = await self.client.inspect_room(room_id)
-                        if view.get("phase") == "in_game":
+                        if view.get("phase") in ("playing", "in_game"):
                             return await self._handle_step(event, [])
                     except Exception:
                         pass
@@ -600,7 +600,13 @@ class RussianRoulettePlugin(Star):
             self._set_active_room(event, room_id)
             name = view.get("name", "未命名房间")
             phase = view.get("phase", "unknown")
-            return f"🔗 已将当前群聊切换绑定至房间 [{room_id}]「{name}」(阶段: {phase})！后续指令可直接输入。"
+            phase_zh = {
+                "waiting": "⏳ 等待中",
+                "playing": "⚔️ 激战中",
+                "in_game": "⚔️ 激战中",
+                "finished": "🏁 已终局",
+            }.get(phase, phase)
+            return f"🔗 已将当前群聊切换绑定至房间 [{room_id}]「{name}」(阶段: {phase_zh})！后续指令可直接输入。"
         except McpError as e:
             return f"❌ 无法绑定房间 [{room_id}]: {e.message}"
 
