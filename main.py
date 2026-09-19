@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 try:
     from astrbot.api import AstrBotConfig, logger
     from astrbot.api.event import AstrMessageEvent, filter
+    from astrbot.api.message_components import At, Plain
     from astrbot.api.star import Context, Star
 except ImportError:
     # Standalone mock fallback for local unit testing outside AstrBot environment
@@ -26,6 +27,14 @@ except ImportError:
 
     class AstrBotConfig(dict):  # type: ignore
         pass
+
+    class At:  # type: ignore
+        def __init__(self, qq: Any = None):
+            self.qq = qq
+
+    class Plain:  # type: ignore
+        def __init__(self, text: str = ""):
+            self.text = text
 
     class AstrMessageEvent:  # type: ignore
         def __init__(self, sender_id: str = "mock_user", message_str: str = ""):
@@ -45,6 +54,17 @@ except ImportError:
         def plain_result(self, text: str) -> str:
             return text
 
+        def chain_result(self, chain: List[Any]) -> str:
+            parts = []
+            for c in chain:
+                if hasattr(c, "text"):
+                    parts.append(getattr(c, "text"))
+                elif hasattr(c, "qq"):
+                    parts.append(f"@{getattr(c, 'qq')}")
+                else:
+                    parts.append(str(c))
+            return "".join(parts)
+
     class filter:  # type: ignore
         @staticmethod
         def command(cmd_name: str):
@@ -56,18 +76,30 @@ except ImportError:
 try:
     from .mcp_client import McpError, RussianRouletteMcpClient
     from .renderer import (
+        compress_action_desc,
+        extract_high_priority_notifications,
+        format_compact_record,
+        render_board_block,
+        render_compact_roster,
         render_game_view,
         render_help,
         render_rooms_summary,
         render_step_result,
+        render_turn_callout,
     )
 except ImportError:
     from mcp_client import McpError, RussianRouletteMcpClient
     from renderer import (
+        compress_action_desc,
+        extract_high_priority_notifications,
+        format_compact_record,
+        render_board_block,
+        render_compact_roster,
         render_game_view,
         render_help,
         render_rooms_summary,
         render_step_result,
+        render_turn_callout,
     )
 
 DIRECTION_MAP = {
@@ -97,7 +129,93 @@ class RussianRoulettePlugin(Star):
         
         # Session context -> Active room_id cache (makes chat play convenient)
         self._session_rooms: Dict[str, str] = {}
+        # Player ID / Name -> QQ number mapping for @mentions
+        self._player_qq_map: Dict[str, str] = {}
         logger.info(f"RussianRoulettePlugin initialized with backend: {server_url}")
+
+    def _track_player_qq(self, event: AstrMessageEvent, room_view: Optional[Dict[str, Any]] = None):
+        """Remembers QQ numbers of human participants for dedicated @mentions."""
+        sid = event.get_sender_id()
+        if sid and sid.isdigit():
+            self._player_qq_map[sid] = sid
+            self._player_qq_map[event.get_sender_name()] = sid
+
+        if room_view:
+            import re
+            for m in room_view.get("members", []):
+                pid = m.get("player_id")
+                if pid is not None and m.get("kind") == "human":
+                    name = m.get("name", "")
+                    match = re.search(r"\d{5,12}", name)
+                    if match:
+                        self._player_qq_map[str(pid)] = match.group(0)
+                    elif sid and sid.isdigit():
+                        self._player_qq_map[str(pid)] = sid
+
+    def _render_callout_result(self, event: AstrMessageEvent, room_view: Dict[str, Any]) -> Any:
+        """Renders the acting player's turn callout (with real @ mention for humans if available)."""
+        callout = render_turn_callout(room_view, player_qq_map=self._player_qq_map)
+        if not callout:
+            return None
+
+        if callout.get("is_human"):
+            qq = callout.get("qq")
+            name = callout.get("name", "玩家")
+            text = callout.get("text", "")
+            if qq and hasattr(event, "chain_result") and At is not None and Plain is not None:
+                return event.chain_result([
+                    Plain(text="🔔 轮到你行动了！ "),
+                    At(qq=qq),
+                    Plain(text=f"\n{text}"),
+                ])
+            return f"🔔 轮到你行动了！ @{name}\n{text}"
+        else:
+            return callout.get("text")
+
+    def _build_game_message_blocks(
+        self,
+        event: AstrMessageEvent,
+        room_view: Dict[str, Any],
+        step_summary: Optional[str] = None,
+        extra_notifications: Optional[List[str]] = None,
+        show_board: bool = True,
+        max_events: int = 3,
+    ) -> List[Any]:
+        """Separates match status into distinct, bite-sized messages."""
+        self._track_player_qq(event, room_view)
+        blocks: List[Any] = []
+
+        # 1. High-priority notifications (weather changes, dramatic events, finish banner)
+        game = room_view.get("game")
+        if game:
+            records = game.get("records", [])
+            recent_notifs = extract_high_priority_notifications(
+                records[-2:] if len(records) >= 2 else records
+            )
+            for n in recent_notifs:
+                if n not in blocks:
+                    blocks.append(n)
+
+        if extra_notifications:
+            for n in extra_notifications:
+                if n not in blocks:
+                    blocks.append(n)
+
+        # 2. Action / step summary (if an action took place)
+        if step_summary:
+            blocks.append(step_summary)
+
+        # 3. Compact board & tactical map
+        board_msg = render_board_block(room_view, show_visual_board=show_board, max_events=max_events)
+        blocks.append(board_msg)
+
+        # 4. Turn callout for next acting player (only if match is still running)
+        if game and game.get("status") == "running":
+            callout_msg = self._render_callout_result(event, room_view)
+            if callout_msg:
+                blocks.append(callout_msg)
+
+        return blocks
 
     def _resolve_room_id(self, event: AstrMessageEvent, candidate: Optional[str]) -> Optional[str]:
         if candidate and candidate.strip():
@@ -158,64 +276,81 @@ class RussianRoulettePlugin(Star):
     async def _dispatch_command(self, event: AstrMessageEvent, sub_cmd: str, args: List[str]):
         cmd = sub_cmd.lower().strip()
 
+        def _yield_result(item: Any):
+            if isinstance(item, str):
+                return event.plain_result(item)
+            return item
+
         try:
+            res: Any = None
             if cmd in ("help", "帮助", "?", "？"):
                 topic = args[0] if args else None
-                yield event.plain_result(render_help(topic))
+                res = render_help(topic)
 
             elif cmd in ("status", "状态", "ping"):
-                yield event.plain_result(await self._handle_status())
+                res = await self._handle_status()
 
             elif cmd in ("rooms", "房间", "列表", "list"):
-                yield event.plain_result(await self._handle_list_rooms(args))
+                res = await self._handle_list_rooms(args)
 
             elif cmd in ("create", "创建", "建房"):
-                yield event.plain_result(await self._handle_create_room(event, args))
+                res = await self._handle_create_room(event, args)
 
             elif cmd in ("start", "开始", "开局"):
-                yield event.plain_result(await self._handle_start_room(event, args))
+                res = await self._handle_start_room(event, args)
 
             elif cmd in ("view", "战况", "对局", "info", "看"):
-                yield event.plain_result(await self._handle_view_room(event, args))
+                res = await self._handle_view_room(event, args)
 
             elif cmd in ("shoot", "开火", "开枪", "射击", "fire"):
-                yield event.plain_result(await self._handle_shoot(event, args))
+                res = await self._handle_shoot(event, args)
 
             elif cmd in ("move", "移动", "走", "走步", "走位"):
-                yield event.plain_result(await self._handle_move(event, args))
+                res = await self._handle_move(event, args)
 
             elif cmd in ("wait", "等待", "跳过", "pass"):
-                yield event.plain_result(await self._handle_wait(event, args))
+                res = await self._handle_wait(event, args)
 
             elif cmd in ("suicide", "自戕", "自杀", "饮弹"):
-                yield event.plain_result(await self._handle_suicide(event, args))
+                res = await self._handle_suicide(event, args)
 
             elif cmd in ("step", "步进", "下一步", "走步"):
-                yield event.plain_result(await self._handle_step(event, args))
+                res = await self._handle_step(event, args)
 
             elif cmd in ("bot", "bots", "机器人", "加bot", "减bot"):
-                yield event.plain_result(await self._handle_bot_setup(event, cmd, args))
+                res = await self._handle_bot_setup(event, cmd, args)
 
             elif cmd in ("bind", "绑定", "切房"):
-                yield event.plain_result(await self._handle_bind_room(event, args))
+                res = await self._handle_bind_room(event, args)
 
             elif cmd in ("unbind", "解绑", "离开"):
-                yield event.plain_result(await self._handle_unbind_room(event))
+                res = await self._handle_unbind_room(event)
 
             elif cmd in ("dissolve", "解散", "关闭", "kill"):
-                yield event.plain_result(await self._handle_dissolve(event, args))
+                res = await self._handle_dissolve(event, args)
 
             elif cmd in ("rules", "规则"):
-                yield event.plain_result(await self._handle_rules())
+                res = await self._handle_rules()
 
             elif cmd in DIRECTION_MAP:
                 # Direct directional shortcut: e.g. /rr 上, /rr 右, /rr w, /rr 6
-                yield event.plain_result(await self._handle_move(event, [cmd] + args))
+                res = await self._handle_move(event, [cmd] + args)
 
             else:
-                yield event.plain_result(
-                    f"❓ 未知轮盘指令: `{sub_cmd}`\n输入 `/rr 帮助` 查看所有可用指令清单。"
-                )
+                res = f"❓ 未知轮盘指令: `{sub_cmd}`\n输入 `/rr 帮助` 查看所有可用指令清单。"
+
+            if isinstance(res, list):
+                for item in res:
+                    if item:
+                        yield _yield_result(item)
+            elif res:
+                yield _yield_result(res)
+
+        except McpError as e:
+            yield event.plain_result(f"❌ 轮盘游戏错误 [{e.code}]: {e.message}")
+        except Exception as e:
+            logger.exception("Unexpected error in RussianRoulettePlugin")
+            yield event.plain_result(f"⚠️ 执行异常: {e}")
         except McpError as e:
             yield event.plain_result(f"❌ 轮盘游戏错误 [{e.code}]: {e.message}")
         except Exception as e:
@@ -329,7 +464,7 @@ class RussianRoulettePlugin(Star):
             f"👉 请输入 `/rr 开始 {room_id}` 正式装填左轮开战！"
         )
 
-    async def _handle_start_room(self, event: AstrMessageEvent, args: List[str]) -> str:
+    async def _handle_start_room(self, event: AstrMessageEvent, args: List[str]) -> Any:
         room_candidate = None
         seed: Optional[int] = None
 
@@ -353,16 +488,22 @@ class RussianRoulettePlugin(Star):
             return "⚠️ 请指定要开启的5位房间号，或先使用 `/rr 创建` 建立房间。"
 
         self._set_active_room(event, room_id)
-        result = await self.client.start_match(room_id, seed=seed)
+        await self.client.start_match(room_id, seed=seed)
         room_view = await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        max_events = int(self.config.get("max_event_records", 5))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=max_events)
 
         seed_str = f" (固定随机种子: {seed})" if seed is not None else ""
-        return f"🔫 俄罗斯轮盘装填完毕，保险拔除，对决正式开始！{seed_str}\n\n{view_text}"
+        start_notif = f"🔫 俄罗斯轮盘装填完毕，保险拔除，对决正式开始！{seed_str}"
 
-    async def _handle_view_room(self, event: AstrMessageEvent, args: List[str]) -> str:
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            extra_notifications=[start_notif],
+            show_board=show_board,
+            max_events=1,
+        )
+
+    async def _handle_view_room(self, event: AstrMessageEvent, args: List[str]) -> Any:
         room_candidate = None
         max_events = int(self.config.get("max_event_records", 5))
         show_board = bool(self.config.get("show_visual_board", True))
@@ -382,9 +523,18 @@ class RussianRoulettePlugin(Star):
             return "⚠️ 请指定房间号，如 `/rr 战况 88888`，或先使用 `/rr 创建` 建房。"
 
         room_view = await self.client.inspect_room(room_id)
-        return render_game_view(room_view, show_visual_board=show_board, max_events=max_events)
+        phase = room_view.get("phase", "waiting")
+        if phase == "waiting" or not room_view.get("game"):
+            return render_game_view(room_view, player_qq_map=self._player_qq_map)
 
-    async def _handle_shoot(self, event: AstrMessageEvent, args: List[str]) -> str:
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            show_board=show_board,
+            max_events=max_events,
+        )
+
+    async def _handle_shoot(self, event: AstrMessageEvent, args: List[str]) -> Any:
         # Syntax: /rr 开火 [房间号] <方向> 或 /rr 开火 <方向> [房间号]
         direction_str = None
         room_candidate = None
@@ -406,14 +556,18 @@ class RussianRoulettePlugin(Star):
         command = {"type": "shoot", "direction": direction}
         step_res = await self.client.force_command(room_id, command)
         
-        # Follow up with battle report
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=3)
-        return f"{summary}\n\n{view_text}"
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            step_summary=summary,
+            show_board=show_board,
+            max_events=2,
+        )
 
-    async def _handle_move(self, event: AstrMessageEvent, args: List[str]) -> str:
+    async def _handle_move(self, event: AstrMessageEvent, args: List[str]) -> Any:
         # Syntax: /rr 移动 [房间号] <方向> 或 /rr 移动 <方向> [房间号]
         direction_str = None
         room_candidate = None
@@ -438,10 +592,15 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=3)
-        return f"{summary}\n\n{view_text}"
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            step_summary=summary,
+            show_board=show_board,
+            max_events=2,
+        )
 
-    async def _handle_wait(self, event: AstrMessageEvent, args: List[str]) -> str:
+    async def _handle_wait(self, event: AstrMessageEvent, args: List[str]) -> Any:
         candidate = args[0] if len(args) >= 1 else None
         room_id = self._resolve_room_id(event, candidate)
         if not room_id:
@@ -452,10 +611,15 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=3)
-        return f"{summary}\n\n{view_text}"
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            step_summary=summary,
+            show_board=show_board,
+            max_events=2,
+        )
 
-    async def _handle_suicide(self, event: AstrMessageEvent, args: List[str]) -> str:
+    async def _handle_suicide(self, event: AstrMessageEvent, args: List[str]) -> Any:
         candidate = args[0] if len(args) >= 1 else None
         room_id = self._resolve_room_id(event, candidate)
         if not room_id:
@@ -466,10 +630,15 @@ class RussianRoulettePlugin(Star):
         summary = render_step_result(step_res)
         room_view = step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=3)
-        return f"{summary}\n\n{view_text}"
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            step_summary=summary,
+            show_board=show_board,
+            max_events=2,
+        )
 
-    async def _handle_step(self, event: AstrMessageEvent, args: List[str]) -> str:
+    async def _handle_step(self, event: AstrMessageEvent, args: List[str]) -> Any:
         room_candidate = None
         count = 1
 
@@ -490,8 +659,13 @@ class RussianRoulettePlugin(Star):
             summary = render_step_result(step_res)
             room_view = step_res.get("room") or await self.client.inspect_room(room_id)
             show_board = bool(self.config.get("show_visual_board", True))
-            view_text = render_game_view(room_view, show_visual_board=show_board, max_events=3)
-            return f"{summary}\n\n{view_text}"
+            return self._build_game_message_blocks(
+                event,
+                room_view,
+                step_summary=summary,
+                show_board=show_board,
+                max_events=2,
+            )
 
         # Multi-step loop
         step_logs = []
@@ -500,7 +674,8 @@ class RussianRoulettePlugin(Star):
             try:
                 last_step_res = await self.client.step_bot(room_id)
                 action_desc = last_step_res.get("action_desc", "行动完成")
-                step_logs.append(f"• 第 {i} 步: {action_desc}")
+                compact = compress_action_desc(action_desc)
+                step_logs.append(f"• 步 {i}: {compact}")
                 if last_step_res.get("is_match_finished", False):
                     step_logs.append("🏁 对局宣告结束！")
                     break
@@ -508,11 +683,16 @@ class RussianRoulettePlugin(Star):
                 step_logs.append(f"⚠️ 步进暂停 [{e.code}]: {e.message}")
                 break
 
-        header = f"🎯 【连续步进执行结果】(共推进 {len([l for l in step_logs if l.startswith('•')])} 步)：\n" + "\n".join(step_logs)
+        header = f"🎯 【连续步进执行结果】(推进 {len([l for l in step_logs if l.startswith('•')])} 步)：\n" + "\n".join(step_logs)
         room_view = last_step_res.get("room") or await self.client.inspect_room(room_id)
         show_board = bool(self.config.get("show_visual_board", True))
-        view_text = render_game_view(room_view, show_visual_board=show_board, max_events=4)
-        return f"{header}\n\n{view_text}"
+        return self._build_game_message_blocks(
+            event,
+            room_view,
+            step_summary=header,
+            show_board=show_board,
+            max_events=3,
+        )
 
     async def _handle_bot_setup(self, event: AstrMessageEvent, cmd: str, args: List[str]) -> str:
         action = None

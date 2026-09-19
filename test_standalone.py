@@ -109,7 +109,8 @@ class TestRussianRouletteRenderer(unittest.TestCase):
         self.assertIn("暴雨", view_text)
         self.assertIn("Alpha", view_text)
         self.assertIn("Bot_1", view_text)
-        self.assertIn("当前行动", view_text)
+        self.assertIn("👉", view_text)
+        self.assertIn("轮到你行动了", view_text)
         self.assertIn("战术地图", view_text)
         self.assertIn("向东移动一格", view_text)
 
@@ -192,8 +193,9 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
 
         event.message_str = "/rr 开始"
         results = [res async for res in plugin.handle_rr(event)]
+        self.assertGreaterEqual(len(results), 2)
         self.assertIn("俄罗斯轮盘装填完毕", results[0])
-        self.assertIn("Host", results[0])
+        self.assertTrue(any("Host" in r for r in results))
 
     async def test_help_topics(self):
         plugin = RussianRoulettePlugin(None, {})
@@ -303,6 +305,93 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("等待房", results[0])
         self.assertIn("⚔️ 激战中", results[0])
 
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_multi_message_block_separation(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
+        room_data = {
+            "id": "SEP01",
+            "name": "多块测试",
+            "phase": "playing",
+            "members": [
+                {"player_id": 1, "name": "秋元萱", "kind": "human"},
+                {"player_id": 2, "name": "Bot 2", "kind": "bot"},
+            ],
+            "game": {
+                "revision": 2,
+                "round": 2,
+                "status": "running",
+                "weather": "heatwave",
+                "alive_player_count": 2,
+                "current_player_id": 1,
+                "map_size": 2,
+                "cells": [
+                    {"position": {"x": 0, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 0, "y": 1}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 1}, "terrain": "plain"},
+                ],
+                "players": [
+                    {"id": 1, "name": "秋元萱", "kind": "human", "status": "alive", "position": {"x": 0, "y": 0}, "has_shield": True},
+                    {"id": 2, "name": "Bot 2", "kind": "bot", "status": "alive", "position": {"x": 1, "y": 1}, "has_shield": False},
+                ],
+                "records": [
+                    {
+                        "category": "event",
+                        "event": {"type": "weather_changed", "from": "clear", "to": "heatwave"},
+                    }
+                ],
+            },
+        }
+
+        mock_call.side_effect = [
+            room_data,
+            {
+                "action_desc": "Bot PlayerId(2) 执行了 Shoot { direction: Right }",
+                "new_revision": 3,
+                "is_match_finished": False,
+                "room": room_data,
+            },
+        ]
+
+        event = AstrMessageEvent(sender_id="2393120566", message_str="/rr 步进")
+        event.unified_msg_origin = "grp_test"
+        plugin._session_rooms["grp_test"] = "SEP01"
+
+        results = [res async for res in plugin.handle_rr(event)]
+        # We expect separate messages:
+        # Msg 1: Weather notice
+        # Msg 2: Step summary
+        # Msg 3: Tactical Board & Roster
+        # Msg 4: Turn callout for human player with @
+        self.assertGreaterEqual(len(results), 3)
+        self.assertTrue(any("天气异动播报" in r for r in results))
+        self.assertTrue(any("P2🤖 🔫→" in r for r in results))
+        self.assertTrue(any("战术地图" in r for r in results))
+        self.assertTrue(any("轮到你行动了" in r and ("秋元萱" in r or "2393120566" in r) for r in results))
+
+
+class TestCompressionHelpers(unittest.TestCase):
+    def test_compress_action_desc(self):
+        from renderer import compress_action_desc
+        self.assertEqual(compress_action_desc("Bot PlayerId(1) 执行了 Move { direction: Up }"), "P1🤖 🚶↑")
+        self.assertEqual(compress_action_desc("Bot PlayerId(2) 执行了 Shoot { direction: Right }"), "P2🤖 🔫→")
+        self.assertEqual(compress_action_desc("Bot PlayerId(3) 执行了 Wait"), "P3🤖 ⏳跳过")
+        self.assertEqual(compress_action_desc("Player 1 执行了 Move { direction: Down }"), "P1👤 🚶↓")
+
+    def test_compact_roster(self):
+        from renderer import render_compact_roster
+        players = [
+            {"id": 1, "name": "秋元萱", "kind": "human", "status": "alive", "position": {"x": 0, "y": 1}, "has_shield": True},
+            {"id": 2, "name": "Bot 2", "kind": "bot", "status": "eliminated"},
+            {"id": 3, "name": "Bot 3", "kind": "bot", "status": "alive", "position": {"x": 3, "y": 3}, "has_shield": False},
+        ]
+        roster = render_compact_roster(players, current_pid=1)
+        self.assertIn("P1·秋元萱👤💚(0,1)🛡️ 👉", roster)
+        self.assertIn("P2·Bot 2🤖💀", roster)
+        self.assertIn("P3·Bot 3🤖💚(3,3)", roster)
+        self.assertIn("2/3", roster)
+
 
 if __name__ == "__main__":
     unittest.main()
+
