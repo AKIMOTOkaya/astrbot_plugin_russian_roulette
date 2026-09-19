@@ -219,30 +219,79 @@ def render_game_view(
 
 
 def format_record(record: Dict[str, Any]) -> str:
-    """Formats a single GameRecord entry."""
-    rtype = record.get("type", "unknown")
-    if rtype == "action":
-        actor = record.get("actor", "某人")
+    """Formats a single GameRecord entry into human-readable chat text."""
+    category = record.get("category") or record.get("type", "unknown")
+    if category == "action":
+        actor = record.get("actor_id") or record.get("actor", "玩家")
+        cmd = record.get("command", {})
+        if isinstance(cmd, dict):
+            ctype = cmd.get("type", "")
+            cdir = cmd.get("direction", "")
+            dir_zh = {"up": "上", "down": "下", "left": "左", "right": "右"}.get(cdir, cdir)
+            if ctype == "move":
+                return f"🚶 Player {actor} 向【{dir_zh}】移动了一格"
+            elif ctype == "shoot":
+                return f"🔫 Player {actor} 向【{dir_zh}】扣动了扳机！"
+            elif ctype == "wait":
+                return f"⏳ Player {actor} 选择按兵不动，跳过回合"
+            elif ctype == "suicide":
+                return f"☠️ Player {actor} 扣动扳机饮弹自戕！"
         desc = record.get("action_desc", "执行了行动")
         return f"[{actor}] {desc}"
-    elif rtype == "event":
+    elif category == "event":
         event = record.get("event", {})
         etype = event.get("type", "")
-        if etype == "shot_fired":
-            hit = "命中目标！" if event.get("hit") else "空枪/未中！"
-            return f"🔫 枪声响起：{hit}"
+        if etype == "moved":
+            actor = event.get("actor_id", "?")
+            f = event.get("from", {})
+            t = event.get("to", {})
+            return f"🚶 Player {actor} 从 ({f.get('x')},{f.get('y')}) 移动到 ({t.get('x')},{t.get('y')})"
+        elif etype == "move_blocked":
+            actor = event.get("actor_id", "?")
+            reason = event.get("reason", "")
+            reason_map = {"boundary": "出界撞墙", "wall": "撞击水泥墙", "crate": "被木箱阻挡"}
+            return f"🚫 Player {actor} 移动受阻 ({reason_map.get(reason, reason)})"
+        elif etype == "elbow_duel":
+            a = event.get("attacker_id")
+            d = event.get("defender_id")
+            w = event.get("winner_id")
+            return f"🥊 狭路相逢拼肘决斗！Player {a} vs Player {d} -> Player {w} 胜出！"
+        elif etype == "empty_chamber":
+            actor = event.get("actor_id", "?")
+            forced = " [必中保底轮次]" if event.get("forced") else ""
+            return f"💨 咔哒！Player {actor} 扣动扳机，是空弹！{forced}"
+        elif etype == "shot_missed":
+            actor = event.get("actor_id", "?")
+            return f"💥 砰！Player {actor} 击发实弹，未命中任何目标脱靶！"
+        elif etype == "shield_consumed":
+            p = event.get("player_id", "?")
+            return f"🛡️ 咔嚓！Player {p} 的防弹护盾碎裂，抵挡了致命伤害！"
         elif etype == "player_eliminated":
+            p = event.get("player_id", "?")
             cause = format_elimination_cause(event.get("cause", ""))
-            return f"💥 玩家淘汰：{cause}"
-        elif etype == "shield_broken":
-            return "🛡️ 咔嚓！防弹盾受击破裂！"
+            by = event.get("by_player_id")
+            by_str = f"（由 Player {by} 击杀）" if by else ""
+            return f"💀 Player {p} 出局！{cause} {by_str}"
         elif etype == "terrain_damaged":
             return "💥 地形破损！掩体被强力贯穿！"
-        return f"⚡ 发生事件: {etype}"
-    elif rtype == "turn":
-        return f"🔄 轮次更替 -> {record.get('player_name', '下一位')}"
-    elif rtype == "notification":
-        return f"📢 {record.get('message', '')}"
+        elif etype == "terrain_changed":
+            to_t = event.get("to", "")
+            return f"🗺️ 地形演变: 变为 {to_t}"
+        return f"⚡ 事件: {etype}"
+    elif category == "turn":
+        p = record.get("player_id", "?")
+        r = record.get("round", 1)
+        return f"🔄 第 {r} 回合：轮到 Player {p} 行动"
+    elif category == "notification":
+        notif = record.get("notification", {})
+        if isinstance(notif, dict):
+            ntype = notif.get("type", "")
+            if ntype == "match_started":
+                return f"📢 裁判哨响：对决正式开打！(种子: {notif.get('seed')})"
+            elif ntype == "match_finished":
+                w = notif.get("winner_id")
+                return f"🏁 裁判哨响：对决落幕！胜者: Player {w}" if w else "🏁 裁判哨响：同归于尽，无人幸存！"
+        return f"📢 {record.get('message', notif)}"
     return f"ℹ️ {record}"
 
 
