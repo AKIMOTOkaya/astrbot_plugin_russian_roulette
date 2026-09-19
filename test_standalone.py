@@ -195,6 +195,100 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         self.assertIn("俄罗斯轮盘装填完毕", results[0])
         self.assertIn("Host", results[0])
 
+    async def test_help_topics(self):
+        plugin = RussianRoulettePlugin(None, {})
+        event = AstrMessageEvent(sender_id="user_123", message_str="/rr 帮助 开火")
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("指令详情：/rr 开火", results[0])
+        self.assertIn("键盘数字", results[0])
+
+        event.message_str = "/rr 帮助 步进"
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("指令详情：/rr 步进", results[0])
+        self.assertIn("自动", results[0])
+
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_enriched_create_and_start(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
+        event = AstrMessageEvent(sender_id="user_host", message_str="/rr 创建 name=死亡峡谷 bots=5 pass=123456")
+        event.unified_msg_origin = "group_100"
+
+        mock_call.return_value = {"id": "ROOM9", "name": "死亡峡谷", "phase": "waiting"}
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("ROOM9", results[0])
+        self.assertIn("死亡峡谷", results[0])
+        self.assertIn("123456", results[0])
+        # Verify call arguments
+        mock_call.assert_called_with(
+            "referee_create_room",
+            {
+                "room_name": "死亡峡谷",
+                "initial_bots": 5,
+                "password": "123456",
+                "idempotency_key": unittest.mock.ANY,
+            },
+        )
+
+        # Test start with seed
+        mock_call.side_effect = [
+            {"room_id": "ROOM9"},
+            {
+                "id": "ROOM9",
+                "name": "死亡峡谷",
+                "phase": "in_game",
+                "game": {"revision": 1, "round": 1, "status": "running", "weather": "clear", "players": []},
+            },
+        ]
+        event.message_str = "/rr 开始 seed=888888"
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("固定随机种子: 888888", results[0])
+
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_directional_shortcut_and_numpad(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
+        event = AstrMessageEvent(sender_id="user_host", message_str="/rr 上")
+        event.unified_msg_origin = "group_100"
+        plugin._session_rooms["group_100"] = "ROOM9"
+        plugin.client.update_revision("ROOM9", 1)
+
+        mock_call.return_value = {
+            "action_desc": "移动了一格",
+            "room": {"id": "ROOM9", "name": "死亡峡谷", "phase": "in_game", "game": {"revision": 2, "players": []}},
+        }
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("裁判裁定", results[0])
+        # Verify force_command was called with direction "up"
+        mock_call.assert_called_with(
+            "referee_force_command",
+            {
+                "room_id": "ROOM9",
+                "expected_revision": 1,
+                "command": {"type": "move", "direction": "up"},
+                "idempotency_key": unittest.mock.ANY,
+            },
+        )
+
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_bot_setup_and_binding(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
+        event = AstrMessageEvent(sender_id="user_host", message_str="/rr bot 加")
+        event.unified_msg_origin = "group_100"
+        plugin._session_rooms["group_100"] = "ROOM9"
+
+        # 1. bot 加
+        mock_call.side_effect = [
+            {"id": "ROOM9", "phase": "waiting", "members": [{"kind": "human"}, {"kind": "bot"}]},
+            {"members": [{"kind": "human"}, {"kind": "bot"}, {"kind": "bot"}]},
+        ]
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("成功为房间 [ROOM9] 增加 1 名 Bot", results[0])
+
+        # 2. unbind
+        event.message_str = "/rr 解绑"
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertIn("已解除当前群聊与房间 [ROOM9] 的绑定记忆", results[0])
+        self.assertNotIn("group_100", plugin._session_rooms)
+
 
 if __name__ == "__main__":
     unittest.main()

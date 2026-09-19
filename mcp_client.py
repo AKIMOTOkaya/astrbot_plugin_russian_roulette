@@ -205,6 +205,29 @@ class RussianRouletteMcpClient:
             self.update_revision(room_id, 0)
         return result
 
+    async def setup_bots(
+        self,
+        room_id: str,
+        action: str,
+        bot_member_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Adds or removes a bot slot from a waiting room."""
+        room_id = room_id.upper().strip()
+        view = await self.inspect_room(room_id)
+        # Waiting room uses members length or revision
+        game = view.get("game")
+        revision = int(game.get("revision", 0)) if game else 0
+        result = await self.call_tool(
+            "referee_setup_bots",
+            {
+                "room_id": room_id,
+                "action": action.lower().strip(),
+                "bot_member_id": bot_member_id,
+                "expected_revision": revision,
+            },
+        )
+        return result
+
     async def start_match(self, room_id: str, seed: Optional[int] = None) -> Dict[str, Any]:
         """Starts match in room_id."""
         room_id = room_id.upper().strip()
