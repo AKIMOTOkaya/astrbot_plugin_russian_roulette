@@ -56,9 +56,25 @@ class RussianRoulettePlugin(Star):
         
         # Session context -> Active room_id cache (makes chat play convenient)
         self._session_rooms: Dict[str, str] = {}
+        # Session context -> Map display mode cache ("image" | "icon" | "both")
+        self._session_display_modes: Dict[str, str] = {}
         # Player ID / Name -> QQ number mapping for @mentions
         self._player_qq_map: Dict[str, str] = {}
         logger.info(f"RussianRoulettePlugin initialized with backend: {server_url}")
+
+    def _get_display_mode(self, session_id: str) -> str:
+        """Determines active map display mode ('image', 'icon', 'both') for a session."""
+        if session_id in self._session_display_modes:
+            return self._session_display_modes[session_id]
+        cfg_mode = str(self.config.get("map_display_mode", "")).lower().strip()
+        if cfg_mode in ("image", "icon", "both"):
+            return cfg_mode
+        # Backward compatibility with older boolean configuration keys
+        if not bool(self.config.get("render_image", True)):
+            return "icon"
+        if bool(self.config.get("show_visual_board_with_image", False)):
+            return "both"
+        return "image"
 
     def _track_player_qq(self, event: AstrMessageEvent, room_view: Optional[Dict[str, Any]] = None):
         """Remembers QQ numbers of human participants for dedicated @mentions."""
@@ -131,18 +147,18 @@ class RussianRoulettePlugin(Star):
         if step_summary:
             blocks.append(step_summary)
 
-        # 3. Graphical image or compact board
-        render_img = bool(self.config.get("render_image", True))
-        view_mode = str(self.config.get("image_view_mode", "full"))
+        # 3. Graphical image or compact board based on user and plugin preferences
+        session_id = getattr(event, "unified_msg_origin", "default")
+        mode = self._get_display_mode(session_id)
         image_rendered = False
 
-        if render_img and room_view.get("id"):
+        if mode in ("image", "both") and room_view.get("id"):
             room_id = room_view["id"]
             try:
                 img_res = await self.client.render_room_image(
                     room_id=room_id,
                     format_str="png",
-                    view_mode=view_mode,
+                    view_mode=str(self.config.get("image_view_mode", "full")),
                 )
                 if isinstance(img_res, dict) and "base64" in img_res:
                     b64_str = img_res["base64"]
@@ -155,10 +171,17 @@ class RussianRoulettePlugin(Star):
             except Exception as e:
                 logger.warning(f"Failed to render tactical image for room {room_id}: {e}")
 
-        # Fallback or text board if image was not rendered or text board is explicitly enabled
-        if not image_rendered or self.config.get("show_visual_board_with_image", False):
-            board_msg = render_board_block(room_view, show_visual_board=show_board, max_events=max_events)
-            blocks.append(board_msg)
+        # Decide whether to render the visual Emoji board in text:
+        # 1. If mode is "icon" -> always output visual Emoji board
+        # 2. If mode is "both" -> output visual Emoji board along with image
+        # 3. If mode is "image" but image rendering failed -> graceful fallback to Emoji board
+        need_visual_board = (mode == "icon") or (mode == "both") or (not image_rendered)
+        board_msg = render_board_block(
+            room_view,
+            show_visual_board=need_visual_board and show_board,
+            max_events=max_events,
+        )
+        blocks.append(board_msg)
 
         # 4. Turn callout for next acting player (only if match is still running)
         if game and is_game_running(game):
@@ -239,6 +262,9 @@ class RussianRoulettePlugin(Star):
 
             elif cmd in ("view", "战况", "对局", "info", "看"):
                 res = await self._handle_view_room(event, args)
+
+            elif cmd in ("map", "地图", "棋盘", "view_map", "模式", "mode"):
+                res = await self._handle_map(event, args)
 
             elif cmd in ("shoot", "开火", "开枪", "射击", "fire"):
                 res = await self._handle_shoot(event, args)
@@ -466,6 +492,65 @@ class RussianRoulettePlugin(Star):
             show_board=show_board,
             max_events=max_events,
         )
+
+    async def _handle_map(self, event: AstrMessageEvent, args: List[str]) -> Any:
+        """Handles map viewing and display mode switching (/rr 地图 [图标/图片/双模])."""
+        session_id = getattr(event, "unified_msg_origin", "default")
+        room_candidate = None
+        target_mode = None
+
+        for a in args:
+            raw_a = a.lower().strip()
+            if raw_a in ("icon", "图标", "文字", "文本", "emoji", "字符"):
+                target_mode = "icon"
+            elif raw_a in ("image", "图片", "图像", "pic", "img"):
+                target_mode = "image"
+            elif raw_a in ("both", "双模", "全部", "全", "双"):
+                target_mode = "both"
+            elif not room_candidate:
+                room_candidate = a
+
+        mode_switch_msg = None
+        if target_mode:
+            self._session_display_modes[session_id] = target_mode
+            mode_names = {
+                "image": "【图片展示法】（纯净战术地图渲染）",
+                "icon": "【图标展示法】（Emoji 战术字符地图）",
+                "both": "【双模展示法】（同时输出战术图片与字符地图）",
+            }
+            mode_switch_msg = f"⚙️ 地图展示方式已切换为：{mode_names[target_mode]}！"
+
+        room_id = self._resolve_room_id(event, room_candidate)
+        if not room_id:
+            curr_mode = self._get_display_mode(session_id)
+            mode_names = {
+                "image": "图片展示法",
+                "icon": "图标展示法 (Emoji)",
+                "both": "双模展示法",
+            }
+            prefix = f"{mode_switch_msg}\n" if mode_switch_msg else ""
+            return (
+                f"{prefix}🗺️ 当前本群地图展示方式：【{mode_names.get(curr_mode, curr_mode)}】\n"
+                f"• 发送 `/rr 地图 图标` 可切换为字符 Emoji 地图；\n"
+                f"• 发送 `/rr 地图 图片` 可切换为纯地图图片渲染；\n"
+                f"• 发送 `/rr 地图 双模` 可同时展示图片与字符地图。\n"
+                f"💡 当前暂未绑定活跃房间，先输入 `/rr 创建` 或 `/rr 绑定 <房间号>` 开始对局吧！"
+            )
+
+        room_view = await self.client.inspect_room(room_id)
+        phase = room_view.get("phase", "waiting")
+        if phase == "waiting" or not room_view.get("game"):
+            prefix = f"{mode_switch_msg}\n" if mode_switch_msg else ""
+            view_text = render_game_view(room_view, player_qq_map=self._player_qq_map)
+            return f"{prefix}{view_text}"
+
+        blocks = await self._build_game_message_blocks(
+            event,
+            room_view,
+            extra_notifications=[mode_switch_msg] if mode_switch_msg else None,
+            show_board=True,
+        )
+        return blocks
 
     async def _handle_shoot(self, event: AstrMessageEvent, args: List[str]) -> Any:
         # Syntax: /rr 开火 [房间号] <方向> 或 /rr 开火 <方向> [房间号]

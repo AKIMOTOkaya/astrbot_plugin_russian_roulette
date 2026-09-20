@@ -19,6 +19,11 @@
     "type": "bool",
     "default": false
   },
+  "map_display_mode": {
+    "description": "默认战术地图展示方式（image: 纯地图图片展示法 / icon: Emoji字符图标展示法 / both: 图片与图标双模同时展示）",
+    "type": "string",
+    "default": "image"
+  },
   "show_visual_board": {
     "description": "是否在战况中打印 ASCII/Emoji 字符战术棋盘（仅在未启用图片或图片降级时生效）",
     "type": "bool",

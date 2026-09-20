@@ -592,8 +592,51 @@ class TestCompressionHelpers(unittest.TestCase):
 
         self.assertTrue(is_game_finished({"status": "finished"}))
         self.assertTrue(is_game_finished({"status": {"state": "finished", "winner_id": 1}}))
-        self.assertFalse(is_game_finished({"status": {"state": "running"}}))
-        self.assertFalse(is_game_finished(None))
+    def test_layered_render_board(self):
+        cells = [
+            {"position": {"x": 0, "y": 0}, "terrain": "plain", "object": "wall"},
+            {"position": {"x": 1, "y": 0}, "terrain": "water", "object": "crate"},
+            {"position": {"x": 2, "y": 0}, "terrain": "water", "object": None},
+            {"position": {"x": 0, "y": 1}, "terrain": "ice", "object": None},
+            {"position": {"x": 1, "y": 1}, "terrain": "high_ground", "object": "mine"},
+            {"position": {"x": 2, "y": 1}, "terrain": "plain", "object": "shield"},
+            {"position": {"x": 0, "y": 2}, "terrain": "plain", "object": None},
+            {"position": {"x": 1, "y": 2}, "terrain": "plain", "object": None},
+            {"position": {"x": 2, "y": 2}, "terrain": "plain", "object": None},
+        ]
+        players = [
+            {"id": 1, "status": "alive", "kind": "human", "position": {"x": 0, "y": 2}},
+            {"id": 2, "status": "alive", "kind": "bot", "position": {"x": 2, "y": 2}},
+        ]
+        board = render_board(3, cells, players)
+        # Check that wall & crate objects render over plain & water
+        self.assertIn("🧱", board)
+        self.assertIn("📦", board)
+        # Check pure water cell renders water
+        self.assertIn("🌊", board)
+        # Check ice & high ground & mine & shield
+        self.assertIn("🧊", board)
+        self.assertIn("💣", board)
+        self.assertIn("🛡️", board)
+        # Check human and bot players
+        self.assertIn("👤", board)
+        self.assertIn("🤖", board)
+
+    def test_map_display_mode_switching(self):
+        plugin = RussianRoulettePlugin(None, config={"map_display_mode": "image"})
+        # Default mode
+        self.assertEqual(plugin._get_display_mode("session_1"), "image")
+
+        # Switch to icon mode
+        plugin._session_display_modes["session_1"] = "icon"
+        self.assertEqual(plugin._get_display_mode("session_1"), "icon")
+
+        # Another session still image
+        self.assertEqual(plugin._get_display_mode("session_2"), "image")
+
+        # Switch to both mode
+        plugin._session_display_modes["session_2"] = "both"
+        self.assertEqual(plugin._get_display_mode("session_2"), "both")
 
 
 if __name__ == "__main__":

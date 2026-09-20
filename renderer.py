@@ -135,6 +135,7 @@ def render_help(topic: Optional[str] = None) -> str:
         "  • /rr bot 加/减/<数量>   - 在等待阶段调整 Bot 席位\n"
         "  • /rr 开始 [房间] [种子] - 装填弹巢开局 (支持固定随机种子)\n"
         "  • /rr 战况 [房间] [条数] - 查看棋盘、血量与流水 (支持简略/详细)\n"
+        "  • /rr 地图 [模式]        - 查看或切换地图展示方式 (图标/图片/双模)\n"
         "  • /rr 绑定 <房间号>      - 切换当前群聊绑定的活跃房间\n"
         "  • /rr 解散 [房间号]      - 强制结束并解散房间\n"
         "\n"
@@ -321,6 +322,15 @@ def format_compact_record(record: Dict[str, Any]) -> str:
         elif etype == "terrain_changed":
             to_t = event.get("to", "")
             return f"🗺️ 地形演变 ➔ {to_t}"
+        elif etype == "object_destroyed":
+            obj = event.get("object", "掩体")
+            return f"💥 掩体粉碎: {obj}"
+        elif etype == "object_placed":
+            obj = event.get("object", "物体")
+            return f"📦 物体放置: {obj}"
+        elif etype == "item_collected":
+            item = event.get("item", event.get("object", "道具"))
+            return f"🎁 拾取道具: {item}"
         return f"⚡ {etype}"
 
     elif category == "turn":
@@ -378,7 +388,7 @@ def extract_high_priority_notifications(records: List[Dict[str, Any]]) -> List[s
 
 
 def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[str, Any]]) -> str:
-    """Renders a compact visual ASCII/Emoji grid for chat."""
+    """Renders a compact visual ASCII/Emoji grid for chat supporting decoupled terrains and map objects."""
     if not cells or map_size <= 0:
         return ""
 
@@ -390,18 +400,25 @@ def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[
             is_bot = p.get("kind") == "bot"
             player_positions[(pos["x"], pos["y"])] = "🤖" if is_bot else "👤"
 
+    # Base ground terrains
     terrain_symbols = {
         "plain": "▫️",
         "empty": "▫️",
-        "wall": "🧱",
-        "crate": "📦",
         "water": "🌊",
         "ice": "🧊",
         "frozen_water": "🧊",
-        "mine": "💣",
-        "medkit": "🩹",
         "high_ground": "⛰️",
+        "highground": "⛰️",
         "mud": "🟫",
+    }
+
+    # Overlay map objects & pickups
+    object_symbols = {
+        "wall": "🧱",
+        "crate": "📦",
+        "mine": "💣",
+        "shield": "🛡️",
+        "medkit": "🩹",
     }
 
     grid: List[List[str]] = [["▫️" for _ in range(map_size)] for _ in range(map_size)]
@@ -411,9 +428,16 @@ def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[
         if 0 <= x < map_size and 0 <= y < map_size:
             if (x, y) in player_positions:
                 grid[y][x] = player_positions[(x, y)]
+            elif cell.get("object"):
+                obj_key = str(cell["object"]).lower()
+                grid[y][x] = object_symbols.get(obj_key, "📦")
             else:
-                t = cell.get("terrain", "plain")
-                grid[y][x] = terrain_symbols.get(t, "▫️")
+                t = str(cell.get("terrain", "plain")).lower()
+                # Backward compatibility: handle old payloads where object was mixed into terrain
+                if t in object_symbols:
+                    grid[y][x] = object_symbols[t]
+                else:
+                    grid[y][x] = terrain_symbols.get(t, "▫️")
 
     board_lines = ["🗺️ 【战术地图】"]
     for row in grid:
@@ -644,6 +668,16 @@ def format_record(record: Dict[str, Any]) -> str:
             return f"💀 Player {p} 出局！{cause} {by_str}"
         elif etype == "terrain_damaged":
             return "💥 地形破损！掩体被强力贯穿！"
+        elif etype == "object_destroyed":
+            obj = event.get("object", "掩体")
+            return f"💥 掩体摧毁！{obj} 被子弹击得粉碎！"
+        elif etype == "object_placed":
+            obj = event.get("object", "物体")
+            return f"📦 战术空投！战场出现新的 {obj}！"
+        elif etype == "item_collected":
+            item = event.get("item", event.get("object", "道具"))
+            p = event.get("player_id", "?")
+            return f"🎁 Player {p} 拾取了 {item}！"
         elif etype == "terrain_changed":
             to_t = event.get("to", "")
             return f"🗺️ 地形演变: 变为 {to_t}"

@@ -1,6 +1,6 @@
 name: astrbot_plugin_russian_roulette
 display_name: 俄罗斯轮盘
-version: 1.0.2
+version: 1.0.3
 author: Akimoto Kaya
 repo: https://github.com/AKIMOTOkaya/astrbot_plugin_russian_roulette
 short_desc: 俄罗斯轮盘策略对抗游戏主持人插件，集成规则矢量图形渲染合成引擎，支持直连公网 MCP 服务或本地服务，QQ 用户通过 /指令 参与对局
