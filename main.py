@@ -412,7 +412,7 @@ class RussianRoulettePlugin(Star):
                 if pos_args[2].isdigit():
                     initial_bots = int(pos_args[2])
 
-        initial_bots = max(1, min(7, initial_bots))
+        initial_bots = max(3, min(6, initial_bots))
         result = await self.client.create_room(
             room_name=room_name,
             initial_bots=initial_bots,

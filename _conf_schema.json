@@ -24,7 +24,7 @@
     "default": "/api/mcp/call"
   },
   "default_bots": {
-    "description": "创建对局时默认加入的 Bot 数量（1-7）",
+    "description": "创建对局时默认加入的 Bot 数量（3-6）",
     "type": "int",
     "default": 3
   },

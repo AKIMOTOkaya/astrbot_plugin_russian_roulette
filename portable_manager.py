@@ -27,6 +27,7 @@ PRIMARY_DOWNLOAD_URL = (
     f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}"
 )
 FALLBACK_MIRRORS = [
+    f"https://ghfast.top/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
     f"https://ghproxy.net/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
     f"https://mirror.ghproxy.com/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
 ]
@@ -101,7 +102,9 @@ class PortableMcpManager:
             for url in download_urls:
                 try:
                     logger.debug(f"[roulette-portable] 尝试下载地址: {url}")
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=45.0)) as resp:
+                    async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=30.0, connect=6.0)
+                    ) as resp:
                         if resp.status != 200:
                             logger.warning(
                                 f"[roulette-portable] 下载返回状态码 {resp.status}，尝试备用源"
