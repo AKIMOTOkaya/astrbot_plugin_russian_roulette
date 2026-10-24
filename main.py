@@ -14,6 +14,7 @@ from astrbot.api.message_components import At, Plain
 from astrbot.api.star import Context, Star
 
 from .mcp_client import McpError, RussianRouletteMcpClient
+from .portable_manager import PortableMcpManager
 from .renderer import (
     compress_action_desc,
     extract_high_priority_notifications,
@@ -50,15 +51,52 @@ class RussianRoulettePlugin(Star):
     def __init__(self, context: Context, config: Optional[AstrBotConfig | dict] = None):
         super().__init__(context)
         self.config: Dict[str, Any] = config if config is not None else {}
-        server_url = self.config.get("server_url", "http://127.0.0.1:8787")
-        mcp_endpoint = self.config.get("mcp_endpoint", "/api/mcp/call")
-        self.client = RussianRouletteMcpClient(server_url=server_url, mcp_endpoint=mcp_endpoint)
+        self.mode: str = str(self.config.get("mode", "portable")).lower().strip()
+        self.local_port: int = int(self.config.get("local_port", 8787))
+        self.remote_url: str = self.config.get("server_url", "https://rrt.akiai.asia")
+        self.mcp_endpoint: str = self.config.get("mcp_endpoint", "/api/mcp/call")
+
+        # Initialize portable manager with fallback data directory
+        data_dir = None
+        try:
+            from astrbot.api.star import StarTools
+            data_dir = StarTools.get_data_dir("astrbot_plugin_russian_roulette")
+        except Exception:
+            pass
+
+        self.portable_manager = PortableMcpManager(data_dir=data_dir, default_port=self.local_port)
+
+        if self.mode == "portable":
+            server_url = f"http://127.0.0.1:{self.local_port}"
+        else:
+            server_url = self.remote_url
+
+        self.client = RussianRouletteMcpClient(server_url=server_url, mcp_endpoint=self.mcp_endpoint)
         
         # Session context -> Active room_id cache (makes chat play convenient)
         self._session_rooms: Dict[str, str] = {}
         # Player ID / Name -> QQ number mapping for @mentions
         self._player_qq_map: Dict[str, str] = {}
-        logger.info(f"RussianRoulettePlugin initialized with backend: {server_url}")
+        logger.info(
+            f"RussianRoulettePlugin initialized (mode: {self.mode}, backend: {server_url})"
+        )
+
+    async def _ensure_backend_ready(self) -> None:
+        """If running in portable mode, ensures the local binary is downloaded and running."""
+        if self.mode == "portable":
+            try:
+                active_url = await self.portable_manager.ensure_running(self.local_port)
+                if self.client.server_url != active_url:
+                    self.client.server_url = active_url
+            except Exception as e:
+                logger.warning(
+                    f"[roulette] 本地便携引擎启动失败 ({e})，自动回退至公网/远程模式: {self.remote_url}"
+                )
+                self.client.server_url = self.remote_url
+
+    async def terminate(self) -> None:
+        """Lifecycle hook to clean up portable background process if any."""
+        self.portable_manager.terminate()
 
     def _track_player_qq(self, event: AstrMessageEvent, room_view: Optional[Dict[str, Any]] = None):
         """Remembers QQ numbers of human participants for dedicated @mentions."""
@@ -204,60 +242,64 @@ class RussianRoulettePlugin(Star):
                 topic = args[0] if args else None
                 res = render_help(topic)
 
-            elif cmd in ("status", "状态", "ping"):
-                res = await self._handle_status()
-
-            elif cmd in ("rooms", "房间", "列表", "list"):
-                res = await self._handle_list_rooms(args)
-
-            elif cmd in ("create", "创建", "建房"):
-                res = await self._handle_create_room(event, args)
-
-            elif cmd in ("start", "开始", "开局"):
-                res = await self._handle_start_room(event, args)
-
-            elif cmd in ("view", "战况", "对局", "info", "看"):
-                res = await self._handle_view_room(event, args)
-
-            elif cmd in ("map", "地图", "棋盘", "view_map", "模式", "mode"):
-                res = await self._handle_map(event, args)
-
-            elif cmd in ("shoot", "开火", "开枪", "射击", "fire"):
-                res = await self._handle_shoot(event, args)
-
-            elif cmd in ("move", "移动", "走", "走步", "走位"):
-                res = await self._handle_move(event, args)
-
-            elif cmd in ("wait", "等待", "跳过", "pass"):
-                res = await self._handle_wait(event, args)
-
-            elif cmd in ("suicide", "自戕", "自杀", "饮弹"):
-                res = await self._handle_suicide(event, args)
-
-            elif cmd in ("step", "步进", "下一步", "走步"):
-                res = await self._handle_step(event, args)
-
-            elif cmd in ("bot", "bots", "机器人", "加bot", "减bot"):
-                res = await self._handle_bot_setup(event, cmd, args)
-
-            elif cmd in ("bind", "绑定", "切房"):
-                res = await self._handle_bind_room(event, args)
-
-            elif cmd in ("unbind", "解绑", "离开"):
-                res = await self._handle_unbind_room(event)
-
-            elif cmd in ("dissolve", "解散", "关闭", "kill"):
-                res = await self._handle_dissolve(event, args)
-
             elif cmd in ("rules", "规则"):
                 res = await self._handle_rules()
 
-            elif cmd in DIRECTION_MAP:
-                # Direct directional shortcut: e.g. /rr 上, /rr 右, /rr w, /rr 6
-                res = await self._handle_move(event, [cmd] + args)
-
             else:
-                res = f"❓ 未知轮盘指令: `{sub_cmd}`\n输入 `/rr 帮助` 查看所有可用指令清单。"
+                # Ensure backend is ready before running game commands
+                await self._ensure_backend_ready()
+
+                if cmd in ("status", "状态", "ping"):
+                    res = await self._handle_status()
+
+                elif cmd in ("rooms", "房间", "列表", "list"):
+                    res = await self._handle_list_rooms(args)
+
+                elif cmd in ("create", "创建", "建房"):
+                    res = await self._handle_create_room(event, args)
+
+                elif cmd in ("start", "开始", "开局"):
+                    res = await self._handle_start_room(event, args)
+
+                elif cmd in ("view", "战况", "对局", "info", "看"):
+                    res = await self._handle_view_room(event, args)
+
+                elif cmd in ("map", "地图", "棋盘", "view_map", "模式", "mode"):
+                    res = await self._handle_map(event, args)
+
+                elif cmd in ("shoot", "开火", "开枪", "射击", "fire"):
+                    res = await self._handle_shoot(event, args)
+
+                elif cmd in ("move", "移动", "走", "走步", "走位"):
+                    res = await self._handle_move(event, args)
+
+                elif cmd in ("wait", "等待", "跳过", "pass"):
+                    res = await self._handle_wait(event, args)
+
+                elif cmd in ("suicide", "自戕", "自杀", "饮弹"):
+                    res = await self._handle_suicide(event, args)
+
+                elif cmd in ("step", "步进", "下一步", "走步"):
+                    res = await self._handle_step(event, args)
+
+                elif cmd in ("bot", "bots", "机器人", "加bot", "减bot"):
+                    res = await self._handle_bot_setup(event, cmd, args)
+
+                elif cmd in ("bind", "绑定", "切房"):
+                    res = await self._handle_bind_room(event, args)
+
+                elif cmd in ("unbind", "解绑", "离开"):
+                    res = await self._handle_unbind_room(event)
+
+                elif cmd in ("dissolve", "解散", "关闭", "kill"):
+                    res = await self._handle_dissolve(event, args)
+
+                elif cmd in DIRECTION_MAP:
+                    # Direct directional shortcut: e.g. /rr 上, /rr 右, /rr w, /rr 6
+                    res = await self._handle_move(event, [cmd] + args)
+
+                else:
+                    res = f"❓ 未知轮盘指令: `{sub_cmd}`\n输入 `/rr 帮助` 查看所有可用指令清单。"
 
             if isinstance(res, list):
                 for item in res:
@@ -275,21 +317,31 @@ class RussianRoulettePlugin(Star):
     # --- Command implementations ---
 
     async def _handle_status(self) -> str:
+        mode_desc = (
+            "便携内置引擎 (Portable)" if self.mode == "portable" else "远程公网服务器 (Remote)"
+        )
         url = self.client.get_full_url()
         try:
             rooms = await self.client.list_rooms()
             return (
                 f"✅ 轮盘后端连接正常！\n"
+                f"• 运行模式: {mode_desc}\n"
                 f"• 服务地址: {self.client.server_url}\n"
                 f"• MCP端点: {self.client.mcp_endpoint}\n"
                 f"• 当前活跃房间: {len(rooms)} 间"
             )
         except Exception as e:
+            hint = (
+                "• 建议检查便携引擎是否成功拉取，或在插件配置中将 mode 设置为 'remote' 并填入公网地址。"
+                if self.mode == "portable"
+                else "• 建议检查远程服务地址是否正确，或网络是否通畅。"
+            )
             return (
                 f"❌ 无法连接到轮盘后端！\n"
+                f"• 运行模式: {mode_desc}\n"
                 f"• 目标端点: {url}\n"
                 f"• 失败原因: {e}\n"
-                f"• 建议检查 roulette-backend 或 roulette-local 是否正在运行。"
+                f"{hint}"
             )
 
     async def _handle_list_rooms(self, args: List[str]) -> str:

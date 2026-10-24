@@ -3,6 +3,16 @@
 本项目遵循 [Semantic Versioning (语义化版本)](https://semver.org/lang/zh-CN/) 规范。
 注意：AstrBot 插件市场要求每次提交或重新审核发布时**必须递增版本号**，即使历史版本被驳回或撤回也不得复用。
 
+## [1.1.0] - 2026-10-25
+
+### 新增与核心升级 (Features & Core Upgrades)
+- **默认便携内置引擎 (Portable Mode)**：实现 `PortableMcpManager` 模块，默认以本地便携方式启动。根据系统架构（Linux x86_64、Linux aarch64 树莓派等）自动从官方二进制发布仓库（`AKIMOTOkaya/roulette-mcp-binaries`）安全拉取对应平台的预编译静态单二进制并一键在本地运行，小白用户无需额外搭建或配置后端，开箱即玩；
+- **完整保留公网选项 (Remote Mode)**：在 `_conf_schema.json` 中配置 `mode: portable | remote`，保留直连公网中央服务器选项（默认预设官方端点 `https://rrt.akiai.asia`），大群与集中联机随时无缝切换；
+- **智能优雅降级与网络加速**：内置 GitHub 与国内镜像双传输通道；在非预编译平台或网络异常时自动优雅回退至公网服务器，保证指令 100% 始终可用；
+- **状态检查看板增强**：`/rr 状态` 新增运行模式（便携内置 / 远程公网）展示与端点健康诊断信息。
+
+---
+
 ## [1.0.5] - 2026-10-24
 
 ### 视觉与体验优化 (Visual & UX Improvements)

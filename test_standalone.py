@@ -646,6 +646,48 @@ class TestCompressionHelpers(unittest.TestCase):
         self.assertIn("🤖", board)
 
 
+class TestPortableMcpManager(unittest.TestCase):
+    """Unit tests for the portable MCP manager and multi-mode resolution."""
+
+    def test_platform_asset_resolution(self):
+        from astrbot_plugin_russian_roulette.portable_manager import resolve_platform_asset
+        with patch("platform.system", return_value="Linux"):
+            with patch("platform.machine", return_value="x86_64"):
+                self.assertEqual(resolve_platform_asset(), "roulette-mcp-linux-x86_64.tar.gz")
+            with patch("platform.machine", return_value="aarch64"):
+                self.assertEqual(resolve_platform_asset(), "roulette-mcp-linux-aarch64.tar.gz")
+            with patch("platform.machine", return_value="mips"):
+                self.assertIsNone(resolve_platform_asset())
+
+        with patch("platform.system", return_value="Windows"):
+            self.assertIsNone(resolve_platform_asset())
+
+    def test_portable_manager_binary_paths(self):
+        from astrbot_plugin_russian_roulette.portable_manager import PortableMcpManager
+        mgr = PortableMcpManager(data_dir=Path("/tmp/mock_data"), default_port=8787)
+        self.assertEqual(mgr.binary_path, Path("/tmp/mock_data/bin/roulette-mcp"))
+        self.assertEqual(mgr.default_port, 8787)
+        self.assertFalse(mgr.is_binary_available())
+
+    def test_status_displays_portable_mode(self):
+        from astrbot_plugin_russian_roulette.main import RussianRoulettePlugin
+        plugin = RussianRoulettePlugin(None, config={"mode": "portable", "local_port": 8787})
+        self.assertEqual(plugin.mode, "portable")
+        with patch.object(plugin.client, "list_rooms", new_callable=AsyncMock, return_value=[]):
+            res = asyncio.run(plugin._handle_status())
+            self.assertIn("便携内置引擎 (Portable)", res)
+            self.assertIn("8787", res)
+
+    def test_status_displays_remote_mode(self):
+        from astrbot_plugin_russian_roulette.main import RussianRoulettePlugin
+        plugin = RussianRoulettePlugin(None, config={"mode": "remote", "server_url": "https://rrt.akiai.asia"})
+        self.assertEqual(plugin.mode, "remote")
+        with patch.object(plugin.client, "list_rooms", new_callable=AsyncMock, return_value=[]):
+            res = asyncio.run(plugin._handle_status())
+            self.assertIn("远程公网服务器 (Remote)", res)
+            self.assertIn("https://rrt.akiai.asia", res)
+
+
 if __name__ == "__main__":
     unittest.main()
 

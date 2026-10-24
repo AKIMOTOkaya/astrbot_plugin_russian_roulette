@@ -1,8 +1,22 @@
 {
-  "server_url": {
-    "description": "俄罗斯轮盘游戏后端服务地址（支持公网 MCP 服务器地址或本地开发模式 http://127.0.0.1:8787）",
+  "mode": {
+    "description": "运行模式：portable（默认：便携式内置引擎，自动按系统架构拉取并启动本地服务，开箱即玩）或 remote（连接已部署的公网/云端服务器）",
     "type": "string",
-    "default": "http://127.0.0.1:8787"
+    "options": [
+      "portable",
+      "remote"
+    ],
+    "default": "portable"
+  },
+  "server_url": {
+    "description": "俄罗斯轮盘游戏后端地址（在 remote 模式下生效；支持公网端点 https://rrt.akiai.asia 或自建服务）",
+    "type": "string",
+    "default": "https://rrt.akiai.asia"
+  },
+  "local_port": {
+    "description": "便携式 (portable) 模式下本地服务监听的端口号",
+    "type": "int",
+    "default": 8787
   },
   "mcp_endpoint": {
     "description": "MCP Tool JSON-RPC 调用端点路径",
