@@ -511,15 +511,15 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("轮到你行动了" in r and ("秋元萱" in r or "2393120566" in r) for r in results))
 
     @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
-    async def test_image_rendering_success_and_fallback(self, mock_call):
-        plugin = RussianRoulettePlugin(None, {"render_image": True, "show_visual_board_with_image": False})
+    async def test_pure_text_game_message_blocks(self, mock_call):
+        plugin = RussianRoulettePlugin(None, {})
         event = AstrMessageEvent(sender_id="2393120566", message_str="/rr 战况")
         event.unified_msg_origin = "grp_test"
-        plugin._session_rooms["grp_test"] = "IMG01"
+        plugin._session_rooms["grp_test"] = "TXT01"
 
         room_data = {
-            "id": "IMG01",
-            "name": "战术图像测试",
+            "id": "TXT01",
+            "name": "纯文本战况测试",
             "phase": "in_game",
             "game": {
                 "revision": 1,
@@ -543,25 +543,47 @@ class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
             },
         }
 
-        # Case 1: Image renders successfully -> blocks contain image, no redundant text board
-        mock_call.side_effect = [
-            room_data,                                                   # inspect_room
-            {"base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}, # render_room_image
-        ]
+        mock_call.return_value = room_data
         results = [res async for res in plugin.handle_rr(event)]
-        # Check that Image component exists
-        self.assertTrue(any(hasattr(r, "base64") or "iVBORw0" in str(r) for r in results))
-        # Text board should NOT be present when show_visual_board_with_image=False
-        self.assertFalse(any("战术地图" in str(r) for r in results))
-
-        # Case 2: Image rendering fails -> fallback to text board
-        mock_call.side_effect = [
-            room_data,                     # inspect_room
-            Exception("Simulated MCP Error"), # render_room_image fails
-        ]
-        results = [res async for res in plugin.handle_rr(event)]
-        # Fallback text board should now be present!
         self.assertTrue(any("战术地图" in str(r) for r in results))
+        self.assertTrue(any("图例" in str(r) for r in results))
+
+    @patch.object(RussianRouletteMcpClient, "call_tool", new_callable=AsyncMock)
+    async def test_map_command_rendering(self, mock_call):
+        plugin = RussianRoulettePlugin(None, config={})
+        event = AstrMessageEvent(sender_id="2393120566", message_str="/rr 地图")
+        event.unified_msg_origin = "grp_map"
+        plugin._session_rooms["grp_map"] = "MAP01"
+
+        mock_call.return_value = {
+            "id": "MAP01",
+            "name": "战术地图查看",
+            "phase": "in_game",
+            "game": {
+                "revision": 1,
+                "round": 1,
+                "status": "running",
+                "weather": "clear",
+                "alive_player_count": 2,
+                "current_player_id": 1,
+                "players": [
+                    {"id": 1, "name": "Host", "kind": "human", "status": "alive", "position": {"x": 0, "y": 0}},
+                    {"id": 2, "name": "Bot1", "kind": "bot", "status": "alive", "position": {"x": 1, "y": 1}},
+                ],
+                "map_size": 2,
+                "cells": [
+                    {"position": {"x": 0, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 0}, "terrain": "plain"},
+                    {"position": {"x": 0, "y": 1}, "terrain": "plain"},
+                    {"position": {"x": 1, "y": 1}, "terrain": "plain"},
+                ],
+                "records": [],
+            },
+        }
+
+        results = [res async for res in plugin.handle_rr(event)]
+        self.assertTrue(any("战术地图" in str(r) for r in results))
+        self.assertTrue(any("图例" in str(r) for r in results))
 
 
 
@@ -621,22 +643,6 @@ class TestCompressionHelpers(unittest.TestCase):
         # Check human and bot players
         self.assertIn("👤", board)
         self.assertIn("🤖", board)
-
-    def test_map_display_mode_switching(self):
-        plugin = RussianRoulettePlugin(None, config={"map_display_mode": "image"})
-        # Default mode
-        self.assertEqual(plugin._get_display_mode("session_1"), "image")
-
-        # Switch to icon mode
-        plugin._session_display_modes["session_1"] = "icon"
-        self.assertEqual(plugin._get_display_mode("session_1"), "icon")
-
-        # Another session still image
-        self.assertEqual(plugin._get_display_mode("session_2"), "image")
-
-        # Switch to both mode
-        plugin._session_display_modes["session_2"] = "both"
-        self.assertEqual(plugin._get_display_mode("session_2"), "both")
 
 
 if __name__ == "__main__":

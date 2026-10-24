@@ -135,7 +135,7 @@ def render_help(topic: Optional[str] = None) -> str:
         "  • /rr bot 加/减/<数量>   - 在等待阶段调整 Bot 席位\n"
         "  • /rr 开始 [房间] [种子] - 装填弹巢开局 (支持固定随机种子)\n"
         "  • /rr 战况 [房间] [条数] - 查看棋盘、血量与流水 (支持简略/详细)\n"
-        "  • /rr 地图 [模式]        - 查看或切换地图展示方式 (图标/图片/双模)\n"
+        "  • /rr 地图 [房间号]      - 查看当前战况的 Emoji 战术字符地图与图例\n"
         "  • /rr 绑定 <房间号>      - 切换当前群聊绑定的活跃房间\n"
         "  • /rr 解散 [房间号]      - 强制结束并解散房间\n"
         "\n"
@@ -442,6 +442,7 @@ def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[
     board_lines = ["🗺️ 【战术地图】"]
     for row in grid:
         board_lines.append(" ".join(row))
+    board_lines.append("💡 图例: 👤玩家 🤖Bot 🧱石墙 📦木箱 💣地雷 🛡️护盾 🌊水域 🧊冰面 ⛰️高地")
     return "\n".join(board_lines)
 
 
