@@ -29,10 +29,22 @@ class RussianRouletteMcpClient:
     Maintains revision tracking and idempotency for referee tools.
     """
 
-    def __init__(self, server_url: str = "http://127.0.0.1:8787", mcp_endpoint: str = "/api/mcp/call"):
+    def __init__(
+        self,
+        server_url: str = "http://127.0.0.1:8787",
+        mcp_endpoint: str = "/api/mcp/call",
+        auth_token: Optional[str] = None,
+    ):
         self.server_url = server_url.rstrip("/")
         self.mcp_endpoint = mcp_endpoint if mcp_endpoint.startswith("/") else f"/{mcp_endpoint}"
+        self.auth_token = (auth_token or "").strip() or None
         self._revision_cache: Dict[str, int] = {}
+
+    def _headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        return headers
 
     def get_full_url(self) -> str:
         return f"{self.server_url}{self.mcp_endpoint}"
@@ -60,7 +72,7 @@ class RussianRouletteMcpClient:
                 async with session.post(
                     endpoint,
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers=self._headers(),
                     timeout=aiohttp.ClientTimeout(total=10.0),
                 ) as response:
                     if response.status != 200:

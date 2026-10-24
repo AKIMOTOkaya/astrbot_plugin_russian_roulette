@@ -272,6 +272,47 @@ class TestRussianRouletteMcpClient(unittest.TestCase):
         self.assertEqual(client.get_cached_revision("room1"), 5)
         self.assertEqual(client.get_cached_revision("ROOM1"), 5)  # Case insensitive
 
+    def test_no_auth_header_by_default(self):
+        client = RussianRouletteMcpClient("http://127.0.0.1:8787")
+        self.assertIsNone(client.auth_token)
+        self.assertNotIn("Authorization", client._headers())
+
+    def test_bearer_header_when_token_configured(self):
+        client = RussianRouletteMcpClient(
+            "https://rrt.akiai.asia", auth_token="secret-token"
+        )
+        self.assertEqual(client.auth_token, "secret-token")
+        self.assertEqual(
+            client._headers()["Authorization"], "Bearer secret-token"
+        )
+
+    def test_blank_token_is_treated_as_absent(self):
+        for blank in ("", "   ", None):
+            client = RussianRouletteMcpClient("http://127.0.0.1:8787", auth_token=blank)
+            self.assertIsNone(client.auth_token)
+            self.assertNotIn("Authorization", client._headers())
+
+    def test_portable_mode_drops_remote_token(self):
+        plugin = RussianRoulettePlugin(
+            None, {"mode": "portable", "auth_token": "remote-only"}
+        )
+        # Simulate what _ensure_backend_ready does after the loopback engine is up.
+        plugin.client.auth_token = None
+        self.assertNotIn("Authorization", plugin.client._headers())
+
+    def test_remote_mode_uses_configured_token(self):
+        plugin = RussianRoulettePlugin(
+            None,
+            {
+                "mode": "remote",
+                "server_url": "https://rrt.akiai.asia",
+                "auth_token": "remote-token",
+            },
+        )
+        self.assertEqual(
+            plugin.client._headers()["Authorization"], "Bearer remote-token"
+        )
+
 
 class TestRussianRoulettePluginCommands(unittest.IsolatedAsyncioTestCase):
     async def test_direction_mapping(self):

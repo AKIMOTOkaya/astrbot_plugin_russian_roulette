@@ -55,6 +55,9 @@ class RussianRoulettePlugin(Star):
         self.local_port: int = int(self.config.get("local_port", 8787))
         self.remote_url: str = self.config.get("server_url", "https://rrt.akiai.asia")
         self.mcp_endpoint: str = self.config.get("mcp_endpoint", "/api/mcp/call")
+        # Shared referee token. Only needed when the backend is reached over the
+        # network; the portable loopback engine is trusted without it.
+        self.auth_token: str = str(self.config.get("auth_token", "") or "").strip()
 
         # Initialize portable manager with fallback data directory
         data_dir = None
@@ -71,7 +74,11 @@ class RussianRoulettePlugin(Star):
         else:
             server_url = self.remote_url
 
-        self.client = RussianRouletteMcpClient(server_url=server_url, mcp_endpoint=self.mcp_endpoint)
+        self.client = RussianRouletteMcpClient(
+            server_url=server_url,
+            mcp_endpoint=self.mcp_endpoint,
+            auth_token=self.auth_token,
+        )
         
         # Session context -> Active room_id cache (makes chat play convenient)
         self._session_rooms: Dict[str, str] = {}
@@ -88,11 +95,14 @@ class RussianRoulettePlugin(Star):
                 active_url = await self.portable_manager.ensure_running(self.local_port)
                 if self.client.server_url != active_url:
                     self.client.server_url = active_url
+                # Loopback engine trusts local callers, so drop any remote token.
+                self.client.auth_token = None
             except Exception as e:
                 logger.warning(
                     f"[roulette] 本地便携引擎启动失败 ({e})，自动回退至公网/远程模式: {self.remote_url}"
                 )
                 self.client.server_url = self.remote_url
+                self.client.auth_token = self.auth_token or None
 
     async def terminate(self) -> None:
         """Lifecycle hook to clean up portable background process if any."""

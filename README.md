@@ -52,10 +52,17 @@ git clone https://github.com/AKIMOTOkaya/astrbot_plugin_russian_roulette.git
 | :--- | :--- | :--- | :--- |
 | `server_url` | string | `http://127.0.0.1:8787` | 俄罗斯轮盘游戏后端地址 (支持公网服务器或本地开发服务) |
 | `mcp_endpoint` | string | `/api/mcp/call` | MCP JSON-RPC 调用端点路径 |
+| `auth_token` | string | 空 | 裁判 MCP 鉴权令牌。**仅 `remote` 模式连接公网服务器时需要**，须与后端 `ROULETTE_ADMIN_TOKEN` 一致；`portable` 本地引擎走回环免令牌 |
 | `default_bots` | int | `3` | 快速创建房间时默认加入的 Bot 席位数 (1-7) |
 | `admin_only` | bool | `false` | 是否限制仅管理员可创建或解散房间 |
 | `show_visual_board` | bool | `true` | 是否在战况中打印 Emoji 字符战术棋盘 |
 | `max_event_records` | int | `5` | 战报中最多附带展示的最新戏剧性事件流水条数 |
+
+> ⚠️ **远程模式迁移提示（v1.2.0 起）**
+>
+> 公网后端已为裁判 MCP 工具启用鉴权。使用 `mode: "remote"` 连接公网服务器时，**必须**在 `auth_token` 中填入与后端 `ROULETTE_ADMIN_TOKEN` 一致的令牌，否则所有指令都会返回 `401`。
+>
+> 默认的 `mode: "portable"` 走本地回环地址，后端对回环调用免令牌，**无需任何配置**。
 
 ---
 
