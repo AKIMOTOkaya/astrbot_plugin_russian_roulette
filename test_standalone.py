@@ -623,7 +623,7 @@ class TestCompressionHelpers(unittest.TestCase):
             {"position": {"x": 1, "y": 1}, "terrain": "high_ground", "object": "mine"},
             {"position": {"x": 2, "y": 1}, "terrain": "plain", "object": "shield"},
             {"position": {"x": 0, "y": 2}, "terrain": "plain", "object": None},
-            {"position": {"x": 1, "y": 2}, "terrain": "plain", "object": None},
+            {"position": {"x": 1, "y": 2}, "terrain": "high_ground", "object": None},
             {"position": {"x": 2, "y": 2}, "terrain": "plain", "object": None},
         ]
         players = [
@@ -634,10 +634,11 @@ class TestCompressionHelpers(unittest.TestCase):
         # Check that wall & crate objects render over plain & water
         self.assertIn("🧱", board)
         self.assertIn("📦", board)
-        # Check pure water cell renders water
-        self.assertIn("🌊", board)
+        # Check pure water cell renders monochrome wave
+        self.assertIn("〰️", board)
         # Check ice & high ground & mine & shield
-        self.assertIn("🧊", board)
+        self.assertIn("◇", board)
+        self.assertIn("▲", board)
         self.assertIn("💣", board)
         self.assertIn("🛡️", board)
         # Check human and bot players

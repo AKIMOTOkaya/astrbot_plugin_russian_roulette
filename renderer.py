@@ -400,16 +400,16 @@ def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[
             is_bot = p.get("kind") == "bot"
             player_positions[(pos["x"], pos["y"])] = "🤖" if is_bot else "👤"
 
-    # Base ground terrains
+    # Base ground terrains (monochrome black & white symbols)
     terrain_symbols = {
         "plain": "▫️",
         "empty": "▫️",
-        "water": "🌊",
-        "ice": "🧊",
-        "frozen_water": "🧊",
-        "high_ground": "⛰️",
-        "highground": "⛰️",
-        "mud": "🟫",
+        "water": "〰️",
+        "ice": "◇",
+        "frozen_water": "◇",
+        "high_ground": "▲",
+        "highground": "▲",
+        "mud": "▪️",
     }
 
     # Overlay map objects & pickups
@@ -442,7 +442,7 @@ def render_board(map_size: int, cells: List[Dict[str, Any]], players: List[Dict[
     board_lines = ["🗺️ 【战术地图】"]
     for row in grid:
         board_lines.append(" ".join(row))
-    board_lines.append("💡 图例: 👤玩家 🤖Bot 🧱石墙 📦木箱 💣地雷 🛡️护盾 🌊水域 🧊冰面 ⛰️高地")
+    board_lines.append("💡 图例: 👤玩家 🤖Bot 🧱石墙 📦木箱 💣地雷 🛡️护盾 〰️水域 ◇冰面 ▲高地 ▫️平地")
     return "\n".join(board_lines)
 
 
