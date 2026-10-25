@@ -3,6 +3,23 @@
 本项目遵循 [Semantic Versioning (语义化版本)](https://semver.org/lang/zh-CN/) 规范。
 注意：AstrBot 插件市场要求每次提交或重新审核发布时**必须递增版本号**，即使历史版本被驳回或撤回也不得复用。
 
+## [1.3.0] - 2026-10-25
+
+### 新增 (Features)
+- **全平台预编译引擎**：便携引擎现覆盖 5 个平台 —— Linux x86_64、Linux aarch64（树莓派 4/5）、Linux armv7l（树莓派 2/3）、macOS Apple Silicon、macOS Intel。Linux 版本均为静态链接（musl），不依赖目标机 glibc 版本，可在任意发行版直接运行；
+- **平台识别归一化**：`platform.machine()` 的多种拼写（`amd64`/`x86_64`、`arm64`/`aarch64`/`armv8l`、`armv7`/`armv7l`/`armhf`）统一映射到规范架构名，避免因别名导致误判为「平台不支持」；
+- **SHA256 完整性校验**：下载后先取 Release 的 `sha256sums.txt` 并比对哈希，校验失败立即中止并给出明确提示，避免损坏或截断的压缩包在解压阶段才报出难以理解的 tar 错误；
+- **镜像精简**：移除已失效的 `mirror.ghproxy.com`，保留官方源与 `ghfast.top`、`ghproxy.net` 两个可用镜像，减少无谓的 30 秒等待。
+
+### 变更 (Changes)
+- 便携引擎版本从 `v0.1.0` 升级至 `v0.2.0`，包含此前后端修复的裁判端点鉴权（MCP Bearer Token）。
+
+### 说明 (Notes)
+- 不支持自动便携启动的平台（如 Windows）仍会按既有逻辑优雅回退到 `remote` 公网模式，行为不变；
+- 错误提示中的「支持平台」列表改为从 `SUPPORTED_ASSETS` 表生成，不再手动维护，避免与实际产物脱节。
+
+---
+
 ## [1.2.0] - 2026-10-25
 
 ### 新增 (Features)

@@ -7,6 +7,7 @@ managing the local in-process/background portable referee server.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import platform
 import shutil
@@ -18,7 +19,7 @@ from typing import Optional
 import aiohttp
 from astrbot.api import logger
 
-RELEASE_TAG = "v0.1.0"
+RELEASE_TAG = "v0.2.0"
 REPO_OWNER = "AKIMOTOkaya"
 REPO_NAME = "roulette-mcp-binaries"
 
@@ -26,25 +27,75 @@ REPO_NAME = "roulette-mcp-binaries"
 PRIMARY_DOWNLOAD_URL = (
     f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}"
 )
+# Ordered most-to-least reliable; verified reachable from the maintainer's
+# network. `mirror.ghproxy.com` was dropped after it began timing out.
 FALLBACK_MIRRORS = [
     f"https://ghfast.top/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
     f"https://ghproxy.net/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
-    f"https://mirror.ghproxy.com/https://github.com/{REPO_OWNER}/{REPO_NAME}/releases/download/{RELEASE_TAG}",
 ]
 
+# Archive name per (system, machine) pair. Keep this table as the single source
+# of truth: the release publishes exactly these names, and `verify_release.py`
+# in the binaries repo checks that the tag matches this table.
+SUPPORTED_ASSETS = {
+    ("linux", "x86_64"): "roulette-mcp-linux-x86_64.tar.gz",
+    ("linux", "aarch64"): "roulette-mcp-linux-aarch64.tar.gz",
+    ("linux", "armv7l"): "roulette-mcp-linux-armv7.tar.gz",
+    ("darwin", "arm64"): "roulette-mcp-darwin-arm64.tar.gz",
+    ("darwin", "x86_64"): "roulette-mcp-darwin-x86_64.tar.gz",
+}
 
-def resolve_platform_asset() -> Optional[str]:
-    """Detects system OS and machine architecture to determine binary package name."""
-    sys_name = platform.system().lower()
-    mach = platform.machine().lower()
+# `platform.machine()` returns several spellings for the same architecture.
+_MACHINE_ALIASES = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "x64": "x86_64",
+    "aarch64": "aarch64",
+    "arm64": "aarch64",
+    "armv8b": "aarch64",
+    "armv8l": "aarch64",
+    "armv7l": "armv7l",
+    "armv7": "armv7l",
+    "armhf": "armv7l",
+}
 
-    if sys_name == "linux":
-        if mach in ("x86_64", "amd64"):
-            return "roulette-mcp-linux-x86_64.tar.gz"
-        elif mach in ("aarch64", "arm64", "armv8b", "armv8l"):
-            return "roulette-mcp-linux-aarch64.tar.gz"
 
-    return None
+def normalize_machine(machine: str) -> str:
+    """Maps the many spellings of an architecture onto one canonical name."""
+    lowered = machine.strip().lower()
+    return _MACHINE_ALIASES.get(lowered, lowered)
+
+
+def resolve_platform_asset(
+    system: Optional[str] = None,
+    machine: Optional[str] = None,
+) -> Optional[str]:
+    """Returns the release archive name for this platform, or None if unsupported.
+
+    Both arguments exist so the mapping can be unit-tested without touching the
+    host platform.
+    """
+    sys_name = (system if system is not None else platform.system()).strip().lower()
+    mach = normalize_machine(machine if machine is not None else platform.machine())
+
+    if sys_name == "darwin" and mach == "aarch64":
+        # macOS reports "arm64"; the table is keyed that way for clarity.
+        return SUPPORTED_ASSETS.get(("darwin", "arm64"))
+
+    return SUPPORTED_ASSETS.get((sys_name, mach))
+
+
+def supported_platforms_hint() -> str:
+    """Human-readable list of platforms that have prebuilt binaries."""
+    labels = {
+        "roulette-mcp-linux-x86_64.tar.gz": "Linux x86_64",
+        "roulette-mcp-linux-aarch64.tar.gz": "Linux aarch64 (树莓派 4/5)",
+        "roulette-mcp-linux-armv7.tar.gz": "Linux armv7l (树莓派 2/3)",
+        "roulette-mcp-darwin-arm64.tar.gz": "macOS Apple Silicon",
+        "roulette-mcp-darwin-x86_64.tar.gz": "macOS Intel",
+    }
+    return "、".join(labels[name] for name in SUPPORTED_ASSETS.values())
+
 
 
 class PortableMcpManager:
@@ -83,10 +134,9 @@ class PortableMcpManager:
         """Downloads and extracts the prebuilt binary for the current platform."""
         asset_name = resolve_platform_asset()
         if not asset_name:
-            supported = "Linux x86_64, Linux aarch64 (树莓派)"
             raise RuntimeError(
                 f"当前系统平台 ({platform.system()} {platform.machine()}) 暂无预编译便携二进制。\n"
-                f"支持的平台包括: {supported}。\n"
+                f"支持的平台包括: {supported_platforms_hint()}。\n"
                 f"建议在插件配置中将 mode 设置为 'remote' 并连接公网服务器。"
             )
 
@@ -132,6 +182,22 @@ class PortableMcpManager:
                 f"无法从 GitHub Releases 下载预编译引擎 ({asset_name})，请检查网络连接或手动切换至 remote 公网模式。"
             )
 
+        # Verify against the release's sha256sums.txt before touching the archive.
+        # This catches truncated or corrupted downloads that would otherwise
+        # surface later as a confusing tar error.
+        expected = await self._fetch_expected_checksum(asset_name)
+        if expected:
+            actual = self._sha256_of(tmp_archive)
+            if actual != expected:
+                tmp_archive.unlink(missing_ok=True)
+                raise RuntimeError(
+                    f"引擎压缩包校验失败：期望 {expected[:16]}…，实际 {actual[:16]}…。"
+                    f"请重试，或手动切换至 remote 公网模式。"
+                )
+            logger.info("[roulette-portable] SHA256 校验通过")
+        else:
+            logger.warning("[roulette-portable] 未能获取 sha256sums.txt，跳过完整性校验")
+
         # Extract archive
         try:
             with tarfile.open(tmp_archive, "r:gz") as tar:
@@ -160,6 +226,39 @@ class PortableMcpManager:
         finally:
             if tmp_archive and tmp_archive.exists():
                 tmp_archive.unlink(missing_ok=True)
+
+    @staticmethod
+    def _sha256_of(path: Path) -> str:
+        """Returns the hex SHA256 digest of a file."""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
+
+    async def _fetch_expected_checksum(self, asset_name: str) -> Optional[str]:
+        """Fetches sha256sums.txt from the first reachable source and parses it."""
+        urls = [f"{PRIMARY_DOWNLOAD_URL}/sha256sums.txt"] + [
+            f"{mirror}/sha256sums.txt" for mirror in FALLBACK_MIRRORS
+        ]
+        async with aiohttp.ClientSession() as session:
+            for url in urls:
+                try:
+                    async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=15.0, connect=6.0)
+                    ) as resp:
+                        if resp.status != 200:
+                            continue
+                        text = await resp.text()
+                except Exception as e:
+                    logger.debug(f"[roulette-portable] 校验文件下载失败 {url}: {e}")
+                    continue
+
+                for line in text.splitlines():
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1].lstrip("*") == asset_name:
+                        return parts[0].strip().lower()
+        return None
 
     async def ensure_running(self, port: Optional[int] = None) -> str:
         """

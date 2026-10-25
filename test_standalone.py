@@ -159,6 +159,12 @@ from astrbot_plugin_russian_roulette.renderer import (
     render_step_result,
     render_turn_callout,
 )
+from astrbot_plugin_russian_roulette.portable_manager import (
+    SUPPORTED_ASSETS,
+    normalize_machine,
+    resolve_platform_asset,
+    supported_platforms_hint,
+)
 from astrbot_plugin_russian_roulette.main import DIRECTION_MAP, RussianRoulettePlugin
 
 
@@ -291,6 +297,39 @@ class TestRussianRouletteMcpClient(unittest.TestCase):
             client = RussianRouletteMcpClient("http://127.0.0.1:8787", auth_token=blank)
             self.assertIsNone(client.auth_token)
             self.assertNotIn("Authorization", client._headers())
+
+    def test_resolve_platform_asset_covers_all_supported_targets(self):
+        cases = [
+            ("Linux", "x86_64", "roulette-mcp-linux-x86_64.tar.gz"),
+            ("Linux", "amd64", "roulette-mcp-linux-x86_64.tar.gz"),
+            ("Linux", "aarch64", "roulette-mcp-linux-aarch64.tar.gz"),
+            ("Linux", "arm64", "roulette-mcp-linux-aarch64.tar.gz"),
+            ("Linux", "armv7l", "roulette-mcp-linux-armv7.tar.gz"),
+            ("Linux", "armv7", "roulette-mcp-linux-armv7.tar.gz"),
+            ("Darwin", "arm64", "roulette-mcp-darwin-arm64.tar.gz"),
+            ("Darwin", "aarch64", "roulette-mcp-darwin-arm64.tar.gz"),
+            ("Darwin", "x86_64", "roulette-mcp-darwin-x86_64.tar.gz"),
+        ]
+        for system, machine, expected in cases:
+            with self.subTest(system=system, machine=machine):
+                self.assertEqual(resolve_platform_asset(system, machine), expected)
+
+    def test_resolve_platform_asset_rejects_unsupported(self):
+        for system, machine in [
+            ("Windows", "AMD64"),
+            ("FreeBSD", "amd64"),
+            ("Linux", "mips"),
+            ("Darwin", "armv7l"),
+        ]:
+            with self.subTest(system=system, machine=machine):
+                self.assertIsNone(resolve_platform_asset(system, machine))
+
+    def test_supported_assets_table_is_complete(self):
+        # Every archive the release publishes must be reachable from the table.
+        names = set(SUPPORTED_ASSETS.values())
+        self.assertEqual(len(names), 5)
+        self.assertIn("roulette-mcp-linux-armv7.tar.gz", names)
+        self.assertIn("roulette-mcp-darwin-arm64.tar.gz", names)
 
     def test_portable_mode_drops_remote_token(self):
         plugin = RussianRoulettePlugin(
