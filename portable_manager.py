@@ -13,6 +13,7 @@ import platform
 import shutil
 import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,7 @@ SUPPORTED_ASSETS = {
     ("linux", "armv7l"): "roulette-mcp-linux-armv7.tar.gz",
     ("darwin", "arm64"): "roulette-mcp-darwin-arm64.tar.gz",
     ("darwin", "x86_64"): "roulette-mcp-darwin-x86_64.tar.gz",
+    ("windows", "x86_64"): "roulette-mcp-windows-x86_64.zip",
 }
 
 # `platform.machine()` returns several spellings for the same architecture.
@@ -85,6 +87,21 @@ def resolve_platform_asset(
     return SUPPORTED_ASSETS.get((sys_name, mach))
 
 
+def is_windows() -> bool:
+    """Whether the current process runs on Windows."""
+    return platform.system().strip().lower() == "windows"
+
+
+def binary_filename() -> str:
+    """Name of the engine executable on the current platform."""
+    return "roulette-mcp.exe" if is_windows() else "roulette-mcp"
+
+
+def is_zip_asset(asset_name: str) -> bool:
+    """Windows releases ship as .zip; every other platform uses .tar.gz."""
+    return asset_name.endswith(".zip")
+
+
 def supported_platforms_hint() -> str:
     """Human-readable list of platforms that have prebuilt binaries."""
     labels = {
@@ -93,6 +110,7 @@ def supported_platforms_hint() -> str:
         "roulette-mcp-linux-armv7.tar.gz": "Linux armv7l (树莓派 2/3)",
         "roulette-mcp-darwin-arm64.tar.gz": "macOS Apple Silicon",
         "roulette-mcp-darwin-x86_64.tar.gz": "macOS Intel",
+        "roulette-mcp-windows-x86_64.zip": "Windows x86_64（实验性）",
     }
     return "、".join(labels[name] for name in SUPPORTED_ASSETS.values())
 
@@ -107,7 +125,7 @@ class PortableMcpManager:
         else:
             self.bin_dir = Path(__file__).resolve().parent / "data" / "bin"
 
-        self.binary_path = self.bin_dir / "roulette-mcp"
+        self.binary_path = self.bin_dir / binary_filename()
         self.default_port = default_port
         self._process: Optional[asyncio.subprocess.Process] = None
 
@@ -198,29 +216,38 @@ class PortableMcpManager:
         else:
             logger.warning("[roulette-portable] 未能获取 sha256sums.txt，跳过完整性校验")
 
-        # Extract archive
+        # Extract archive. Windows ships a .zip, every other platform a .tar.gz.
+        exe_name = binary_filename()
         try:
-            with tarfile.open(tmp_archive, "r:gz") as tar:
-                # Security: prevent directory traversal
-                for member in tar.getmembers():
-                    if member.name.startswith("/") or ".." in member.name:
-                        raise ValueError(f"不安全的文件解压路径: {member.name}")
-                tar.extractall(path=self.bin_dir)
+            if is_zip_asset(asset_name):
+                with zipfile.ZipFile(tmp_archive) as zf:
+                    for member in zf.namelist():
+                        if member.startswith("/") or ".." in member:
+                            raise ValueError(f"不安全的文件解压路径: {member}")
+                    zf.extractall(path=self.bin_dir)
+            else:
+                with tarfile.open(tmp_archive, "r:gz") as tar:
+                    # Security: prevent directory traversal
+                    for member in tar.getmembers():
+                        if member.name.startswith("/") or ".." in member.name:
+                            raise ValueError(f"不安全的文件解压路径: {member.name}")
+                    tar.extractall(path=self.bin_dir)
 
             # Locate the extracted executable
-            extracted_bin = self.bin_dir / "roulette-mcp"
+            extracted_bin = self.bin_dir / exe_name
             if not extracted_bin.exists():
                 # Check if it was extracted into a subfolder
-                for p in self.bin_dir.glob("**/roulette-mcp"):
+                for p in self.bin_dir.glob(f"**/{exe_name}"):
                     if p.is_file():
                         shutil.move(str(p), str(self.binary_path))
                         break
 
             if not self.binary_path.exists():
-                raise FileNotFoundError("压缩包内未找到 roulette-mcp 二进制文件")
+                raise FileNotFoundError(f"压缩包内未找到 {exe_name} 二进制文件")
 
-            # Make executable
-            os.chmod(self.binary_path, 0o755)
+            # Make executable (no-op / not applicable on Windows)
+            if not is_windows():
+                os.chmod(self.binary_path, 0o755)
             logger.info(f"[roulette-portable] 便携式引擎已就绪: {self.binary_path}")
             return self.binary_path
         finally:

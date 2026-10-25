@@ -3,6 +3,22 @@
 本项目遵循 [Semantic Versioning (语义化版本)](https://semver.org/lang/zh-CN/) 规范。
 注意：AstrBot 插件市场要求每次提交或重新审核发布时**必须递增版本号**，即使历史版本被驳回或撤回也不得复用。
 
+## [1.3.1] - 2026-10-25
+
+### 新增 (Features)
+- **Windows x86_64 支持（实验性）**：新增 `roulette-mcp-windows-x86_64.zip` 预编译包，插件按平台自动选择 `.zip` 并使用 `zipfile` 解包，可执行文件名为 `roulette-mcp.exe`；`os.chmod` 在 Windows 上自动跳过。
+
+### 变更 (Changes)
+- 解包逻辑按资产扩展名分支：`.zip` 走 `zipfile`（含路径穿越校验），其余走 `tarfile`；
+- 可执行文件名与平台解耦，由 `binary_filename()` 统一决定；
+- 新增 `is_windows()` / `is_zip_asset()` 辅助函数，便于单测覆盖。
+
+### 说明 (Notes)
+- Windows 支持标记为**实验性**：二进制已通过 PE 头与下载解包验证，但尚未在真实 Windows + AstrBot 环境完成端到端对局测试；
+- Windows ARM64 暂无预编译包，会回退到 `remote` 公网模式。
+
+---
+
 ## [1.3.0] - 2026-10-25
 
 ### 新增 (Features)

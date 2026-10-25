@@ -309,6 +309,8 @@ class TestRussianRouletteMcpClient(unittest.TestCase):
             ("Darwin", "arm64", "roulette-mcp-darwin-arm64.tar.gz"),
             ("Darwin", "aarch64", "roulette-mcp-darwin-arm64.tar.gz"),
             ("Darwin", "x86_64", "roulette-mcp-darwin-x86_64.tar.gz"),
+            ("Windows", "AMD64", "roulette-mcp-windows-x86_64.zip"),
+            ("Windows", "x86_64", "roulette-mcp-windows-x86_64.zip"),
         ]
         for system, machine, expected in cases:
             with self.subTest(system=system, machine=machine):
@@ -316,7 +318,7 @@ class TestRussianRouletteMcpClient(unittest.TestCase):
 
     def test_resolve_platform_asset_rejects_unsupported(self):
         for system, machine in [
-            ("Windows", "AMD64"),
+            ("Windows", "aarch64"),   # no arm64 Windows build published
             ("FreeBSD", "amd64"),
             ("Linux", "mips"),
             ("Darwin", "armv7l"),
@@ -327,9 +329,10 @@ class TestRussianRouletteMcpClient(unittest.TestCase):
     def test_supported_assets_table_is_complete(self):
         # Every archive the release publishes must be reachable from the table.
         names = set(SUPPORTED_ASSETS.values())
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 6)
         self.assertIn("roulette-mcp-linux-armv7.tar.gz", names)
         self.assertIn("roulette-mcp-darwin-arm64.tar.gz", names)
+        self.assertIn("roulette-mcp-windows-x86_64.zip", names)
 
     def test_portable_mode_drops_remote_token(self):
         plugin = RussianRoulettePlugin(

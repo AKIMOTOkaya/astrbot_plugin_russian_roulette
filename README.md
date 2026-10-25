@@ -54,7 +54,7 @@ git clone https://github.com/AKIMOTOkaya/astrbot_plugin_russian_roulette.git
 | `mcp_endpoint` | string | `/api/mcp/call` | MCP JSON-RPC 调用端点路径 |
 | `auth_token` | string | 空 | 裁判 MCP 鉴权令牌。**仅 `remote` 模式连接公网服务器时需要**，须与后端 `ROULETTE_ADMIN_TOKEN` 一致；`portable` 本地引擎走回环免令牌 |
 
-> **便携模式支持平台（v1.3.0）**：Linux x86_64、Linux aarch64（树莓派 4/5）、Linux armv7l（树莓派 2/3）、macOS Apple Silicon、macOS Intel。Linux 版本为静态链接，无需安装额外系统库。其他平台（如 Windows）会自动回退到 `remote` 公网模式。
+> **便携模式支持平台（v1.3.1）**：Linux x86_64、Linux aarch64（树莓派 4/5）、Linux armv7l（树莓派 2/3）、macOS Apple Silicon、macOS Intel、Windows x86_64（实验性）。Linux 版本为静态链接，无需安装额外系统库。其他平台（如 Windows ARM64）会自动回退到 `remote` 公网模式。
 | `default_bots` | int | `3` | 快速创建房间时默认加入的 Bot 席位数 (1-7) |
 | `admin_only` | bool | `false` | 是否限制仅管理员可创建或解散房间 |
 | `show_visual_board` | bool | `true` | 是否在战况中打印 Emoji 字符战术棋盘 |
